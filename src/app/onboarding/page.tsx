@@ -66,7 +66,7 @@ export default function OnboardingPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ...formData,
-                    is_profile_complete: 1
+                    is_profile_complete: true
                 })
             })
 
@@ -105,7 +105,7 @@ export default function OnboardingPage() {
                     department: profile?.department || 'Belirtilmemiş',
                     branch: profile?.branch || 'Genel',
                     job_title: profile?.job_title || 'Belirtilmemiş',
-                    is_profile_complete: 1
+                    is_profile_complete: true
                 })
             })
         } catch (error) {

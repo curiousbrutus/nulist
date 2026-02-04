@@ -32,7 +32,7 @@ export default function AuthListener() {
                     if (res.ok) {
                         const profileData = await res.json()
                         // Normalize keys to lowercase
-                        const normalized: any = {}
+                        const normalized: Record<string, unknown> = {}
                         for (const key of Object.keys(profileData)) {
                             normalized[key.toLowerCase()] = profileData[key]
                         }

@@ -287,7 +287,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
             if (newStatus) {
                 useToastStore.getState().showToast('Görev tamamlandı!', 'success')
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Task toggle error:', error)
             // Rollback on error
             set({ tasks: previousTasks, selectedTask: previousSelectedTask })
