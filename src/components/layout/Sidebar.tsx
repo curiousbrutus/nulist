@@ -372,10 +372,10 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                                                     onClick={(e) => e.stopPropagation()}
                                                 />
                                             ) : (
-                                                <span className="truncate flex-1 font-bold flex items-center gap-1.5">
+                                                <span className="truncate flex-1 font-bold flex items-center gap-1.5" title={folder.is_pinned ? "Sabitlenmiş" : undefined}>
                                                     {folder.title}
                                                     {folder.is_pinned && (
-                                                        <Pin className="h-3 w-3 text-orange-400 fill-orange-400/50" title="Sabitlenmiş" />
+                                                        <Pin className="h-3 w-3 text-orange-400 fill-orange-400/50" />
                                                     )}
                                                 </span>
                                             )}

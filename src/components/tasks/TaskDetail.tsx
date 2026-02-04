@@ -385,13 +385,13 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
                                                 )}
                                                 
                                                 {/* Unified Global User Search */}
-                                                <div className={clsx("relative", membersOfFolder.length > 0 && "border-t border-dashed border-muted/30 pt-3")}>
+                                                <div className="relative border-t border-dashed border-muted/30 pt-3 mt-3">
                                                     <div className="flex items-center gap-2 mb-2">
                                                         <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
                                                             <Search className="h-3.5 w-3.5 text-primary" />
                                                         </div>
                                                         <label className="text-[10px] font-bold text-foreground uppercase tracking-wider">
-                                                            {membersOfFolder.length > 0 ? 'Diğer Personellerde Ara' : 'Personel Ara'}
+                                                            Tüm Personellerde Ara (Global)
                                                         </label>
                                                     </div>
                                                     <Input 
