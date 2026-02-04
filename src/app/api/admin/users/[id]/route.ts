@@ -39,7 +39,8 @@ export async function PUT(
         return NextResponse.json({ success: true, updated: result })
     } catch (error: any) {
         console.error('Update user error:', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
+        // Don't expose internal error details for security
+        return NextResponse.json({ error: 'Failed to update user role' }, { status: 500 })
     }
 }
 
@@ -78,6 +79,7 @@ export async function DELETE(
         return NextResponse.json({ success: true })
     } catch (error: any) {
         console.error('Delete user error:', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
+        // Don't expose internal error details for security
+        return NextResponse.json({ error: 'Failed to delete user' }, { status: 500 })
     }
 }
