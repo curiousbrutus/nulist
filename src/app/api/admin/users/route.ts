@@ -19,6 +19,8 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         }
 
+        // VPD Bypass: Not passing userId to executeQuery() allows admins to see all users
+        // This is safe because we've already verified admin role above
         // Get all users with task counts
         const users = await executeQuery(`
             SELECT 

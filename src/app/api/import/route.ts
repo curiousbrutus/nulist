@@ -3,16 +3,18 @@ import { getConnection } from '@/lib/oracle';
 import { auth } from '@/auth';
 import { v4 as uuidv4 } from 'uuid';
 
-// Helper to create slug/code from name
+// Helper to create slug/code from name with Turkish character normalization
 function slugify(text: string) {
     if (!text) return '';
-    // Turkish character map
+    
+    // Turkish character mapping (covers all Turkish-specific characters)
+    // Handles both lowercase and uppercase variants
     const trMap: Record<string, string> = {
         'ç': 'c', 'Ç': 'c',
         'ğ': 'g', 'Ğ': 'g',
         'ş': 's', 'Ş': 's',
         'ü': 'u', 'Ü': 'u',
-        'ı': 'i', 'İ': 'i',
+        'ı': 'i', 'İ': 'i', 'i': 'i', 'I': 'i', // Handle both Turkish 'ı' and regular 'i'
         'ö': 'o', 'Ö': 'o'
     };
     
@@ -23,6 +25,7 @@ function slugify(text: string) {
     }
 
     // Lowercase and remove non-alphanumeric (keep only english letters and numbers)
+    // Also handle edge case of consecutive non-alphanumeric chars
     return slug.toLowerCase()
         .replace(/[^a-z0-9]/g, '')
         .trim();

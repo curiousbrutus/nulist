@@ -93,8 +93,13 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
 
     // Yetki + kendi görevi kontrolü: Sahip her şeyi yapabilir, memberlar sadece kendi görevlerini
     const canDelete = isOwner || (currentMembership?.can_delete_task && isTaskCreator) || isAdmin
-    // Allow everyone to assign anyone (Requested by user)
-    const canAssign = true
+    
+    // Task assignment permissions: Admins/Superadmins have implicit access without needing folder membership
+    // Standard users need either:
+    // - Be the folder owner, OR
+    // - Have can_assign_task permission in the folder, OR
+    // - Be the task creator (can assign their own tasks)
+    const canAssign = isAdmin || isOwner || currentMembership?.can_assign_task || isTaskCreator
 
     // İlerleme Hesaplama
     const totalAssignees = task?.task_assignees?.length || 0
@@ -334,9 +339,8 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
                                             </div>
                                         )}
 
-                                        {/* Sorumlu Ekleme/Çıkarma (Sahip veya can_assign_task yetkisi) */}
-                                        {/* FIX: Always allow admins/superadmins to assign */}
-                                        {(canAssign || isAdmin) && (
+                                        {/* Sorumlu Ekleme/Çıkarma - Controlled by canAssign permission */}
+                                        {canAssign && (
                                             <div className="pt-2">
                                                 {membersOfFolder.length > 0 ? (
                                                     <>
