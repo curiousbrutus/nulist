@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { Folder, List, Task, FolderMember, TaskAttachment } from '@/types/database'
 import { useToastStore } from '@/components/ui/toast'
+import { normalizeKeys } from '@/lib/utils'
 
 interface TaskState {
     folders: Folder[]
@@ -60,38 +61,6 @@ async function apiCall<T>(url: string, options?: RequestInit): Promise<T | null>
         console.error(`API Error (${url}):`, error.message)
         return null
     }
-}
-
-// Oracle column names uppercase olarak dönüyor, normalize edelim
-// Ayrıca Oracle'dan 0/1 olarak gelen boolean'ları true/false'a çevir
-const BOOLEAN_FIELDS = ['is_completed', 'can_add_task', 'can_assign_task', 'can_delete_task', 'can_add_list']
-
-function normalizeKeys<T>(obj: any): T {
-    if (!obj) return obj
-    if (Array.isArray(obj)) {
-        return obj.map(item => normalizeKeys(item)) as T
-    }
-    if (typeof obj === 'object') {
-        const normalized: any = {}
-        for (const key of Object.keys(obj)) {
-            const lowerKey = key.toLowerCase()
-            let value = obj[key]
-
-            // Oracle 0/1 değerlerini boolean'a çevir
-            if (BOOLEAN_FIELDS.includes(lowerKey) && (value === 0 || value === 1 || value === '0' || value === '1')) {
-                value = Boolean(Number(value))
-            }
-
-            // Nested object kontrolü (profile gibi)
-            if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
-                normalized[lowerKey] = normalizeKeys(value)
-            } else {
-                normalized[lowerKey] = value
-            }
-        }
-        return normalized as T
-    }
-    return obj
 }
 
 export const useTaskStore = create<TaskState>((set, get) => ({
@@ -241,7 +210,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         const isCurrentlyCompleted = Boolean(currentStatus)
         const newStatus = !isCurrentlyCompleted
 
-        // Tasks array'ini güncelle
+        // Optimistic update - Tasks array'ini güncelle
         set({
             tasks: previousTasks.map(t => t.id === taskId ? { ...t, is_completed: newStatus } : t)
         })
@@ -251,15 +220,51 @@ export const useTaskStore = create<TaskState>((set, get) => ({
             set({ selectedTask: { ...previousSelectedTask, is_completed: newStatus } })
         }
 
-        const data = await apiCall(`/api/tasks/${taskId}`, {
-            method: 'PUT',
-            body: JSON.stringify({
-                completed: newStatus,
-                completed_at: newStatus ? new Date().toISOString() : null
+        try {
+            const res = await fetch(`/api/tasks/${taskId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    completed: newStatus
+                })
             })
-        })
 
-        if (!data) {
+            if (!res.ok) {
+                let errorMessage = 'Güncelleme hatası'
+                try {
+                    const error = await res.json()
+                    errorMessage = error.error || errorMessage
+                } catch {
+                    // If JSON parsing fails, use default error message
+                }
+                console.error('Task toggle error:', errorMessage)
+                // Rollback on error
+                set({ tasks: previousTasks, selectedTask: previousSelectedTask })
+                useToastStore.getState().showToast(errorMessage, 'error')
+                return
+            }
+
+            const data = await res.json()
+            
+            // Update with server response to ensure consistency
+            const normalizedData = normalizeKeys(data)
+            set({
+                tasks: previousTasks.map(t => t.id === taskId ? { ...t, ...normalizedData } : t)
+            })
+            
+            if (previousSelectedTask && previousSelectedTask.id === taskId) {
+                set({ selectedTask: { ...previousSelectedTask, ...normalizedData } })
+            }
+
+            // Show success toast only if marking as completed
+            if (newStatus) {
+                useToastStore.getState().showToast('Görev tamamlandı!', 'success')
+            }
+        } catch (error: unknown) {
+            console.error('Task toggle error:', error)
+            // Rollback on error
             set({ tasks: previousTasks, selectedTask: previousSelectedTask })
             useToastStore.getState().showToast('Güncelleme hatası', 'error')
         }
