@@ -59,7 +59,8 @@ export async function PUT(
         return NextResponse.json({ success: true })
     } catch (error: any) {
         console.error('Update task error:', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
+        // Don't expose internal error details for security
+        return NextResponse.json({ error: 'Failed to update task status' }, { status: 500 })
     }
 }
 
@@ -98,6 +99,7 @@ export async function DELETE(
         return NextResponse.json({ success: true })
     } catch (error: any) {
         console.error('Delete task error:', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
+        // Don't expose internal error details for security
+        return NextResponse.json({ error: 'Failed to delete task' }, { status: 500 })
     }
 }

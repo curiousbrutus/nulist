@@ -30,7 +30,8 @@ export async function GET(
         return NextResponse.json(feedback || [])
     } catch (error: any) {
         console.error('Get feedback error:', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
+        // Don't expose internal error details for security
+        return NextResponse.json({ error: 'Failed to retrieve feedback' }, { status: 500 })
     }
 }
 
@@ -76,6 +77,7 @@ export async function POST(
         return NextResponse.json({ success: true, insertedRows: result })
     } catch (error: any) {
         console.error('Add feedback error:', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
+        // Don't expose internal error details for security
+        return NextResponse.json({ error: 'Failed to add feedback' }, { status: 500 })
     }
 }

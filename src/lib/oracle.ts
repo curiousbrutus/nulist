@@ -16,6 +16,12 @@ function getOracleConfig() {
 
 /**
  * Oracle Connection Pool'u başlat
+ * Pool Configuration for high-load Next.js environments:
+ * - poolMin: Minimum connections kept alive
+ * - poolMax: Maximum concurrent connections
+ * - poolIncrement: Connections added when pool is exhausted
+ * - poolTimeout: Idle timeout in seconds (0 = keep alive indefinitely)
+ * - queueTimeout: Max wait time for connection when pool is exhausted (ms)
  */
 export async function initializePool() {
     if (pool) return pool
@@ -33,6 +39,7 @@ export async function initializePool() {
             poolMax: 10,
             poolIncrement: 1,
             poolTimeout: 60,
+            queueTimeout: 60000, // 60 seconds max wait for connection (prevents indefinite hangs)
             enableStatistics: true
         })
         console.log('✅ Oracle Connection Pool başarıyla oluşturuldu')

@@ -114,7 +114,10 @@ export async function DELETE(
         const role = userProfile.length > 0 ? userProfile[0].role : 'user'
         const isAdmin = role === 'admin' || role === 'superadmin'
 
-        // Determine effective user ID for VPD (undefined bypasses VPD for admins)
+        // VPD (Virtual Private Database) Bypass for Admins:
+        // - When vpdUserId is undefined, the Oracle VPD context is not set
+        // - This allows admins to bypass row-level security and delete folders created by others
+        // - Standard users must be the folder owner or have explicit permissions
         const vpdUserId = isAdmin ? undefined : session.user.id
 
         // Cascade delete - önce ilişkili kayıtları sil

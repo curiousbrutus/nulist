@@ -57,6 +57,7 @@ export async function PUT(
         return NextResponse.json({ success: true })
     } catch (error: any) {
         console.error('Reassign task error:', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
+        // Don't expose internal error details for security
+        return NextResponse.json({ error: 'Failed to reassign task' }, { status: 500 })
     }
 }
