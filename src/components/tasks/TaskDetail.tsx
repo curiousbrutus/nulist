@@ -305,43 +305,41 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
                                             <div className="pt-2">
                                                 <label className="text-[10px] font-bold text-muted-foreground uppercase mb-2 block">Yeni Sorumlu Ata</label>
                                                 <div className="flex flex-wrap gap-2">
-                                                    {membersOfFolder
-                                                        .filter(member => member.user_id !== task.created_by) // Görevi oluşturanı gösterme
-                                                        .map(member => {
-                                                            const isAssigned = task.task_assignees?.some(ta => ta.user_id === member.user_id)
-                                                            return (
-                                                                <button
-                                                                    key={member.user_id}
-                                                                    onClick={() => handleToggleAssignee(member.user_id)}
+                                                    {membersOfFolder.map(member => {
+                                                        const isAssigned = task.task_assignees?.some(ta => ta.user_id === member.user_id)
+                                                        return (
+                                                            <button
+                                                                key={member.user_id}
+                                                                onClick={() => handleToggleAssignee(member.user_id)}
+                                                                className={clsx(
+                                                                    "h-10 w-10 rounded-full border-2 transition-all hover:scale-110 relative",
+                                                                    isAssigned
+                                                                        ? "border-primary ring-2 ring-primary/30 shadow-lg shadow-primary/20"
+                                                                        : "border-muted/30 opacity-60 grayscale hover:grayscale-0 hover:opacity-100 hover:border-primary/50"
+                                                                )}
+                                                                title={`${member.profile?.full_name || member.profile?.email}${member.profile?.department ? ` - ${member.profile.department}` : ''} ${isAssigned ? '(Atandı)' : ''}`}
+                                                            >
+                                                                <InitialsAvatar
+                                                                    name={member.profile?.full_name}
+                                                                    email={member.profile?.email}
                                                                     className={clsx(
-                                                                        "h-10 w-10 rounded-full border-2 transition-all hover:scale-110 relative",
-                                                                        isAssigned
-                                                                            ? "border-primary ring-2 ring-primary/30 shadow-lg shadow-primary/20"
-                                                                            : "border-muted/30 opacity-60 grayscale hover:grayscale-0 hover:opacity-100 hover:border-primary/50"
+                                                                        "w-full h-full rounded-full",
+                                                                        isAssigned ? "ring-2 ring-primary/40" : ""
                                                                     )}
-                                                                    title={`${member.profile?.full_name || member.profile?.email} ${isAssigned ? '(Atandı)' : ''}`}
-                                                                >
-                                                                    <InitialsAvatar
-                                                                        name={member.profile?.full_name}
-                                                                        email={member.profile?.email}
-                                                                        className={clsx(
-                                                                            "w-full h-full rounded-full",
-                                                                            isAssigned ? "ring-2 ring-primary/40" : ""
-                                                                        )}
-                                                                        textClassName="text-xs"
-                                                                    />
-                                                                    {isAssigned && (
-                                                                        <div className="absolute -top-1 -right-1 h-4 w-4 bg-primary rounded-full flex items-center justify-center">
-                                                                            <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
-                                                                        </div>
-                                                                    )}
-                                                                </button>
-                                                            )
-                                                        })}
+                                                                    textClassName="text-xs"
+                                                                />
+                                                                {isAssigned && (
+                                                                    <div className="absolute -top-1 -right-1 h-4 w-4 bg-primary rounded-full flex items-center justify-center">
+                                                                        <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
+                                                                    </div>
+                                                                )}
+                                                            </button>
+                                                        )
+                                                    })}
                                                 </div>
-                                                {membersOfFolder.length === 1 && membersOfFolder[0].user_id === task.created_by && (
+                                                {membersOfFolder.length === 0 && (
                                                     <p className="text-xs text-muted-foreground mt-2">
-                                                        Departmanda başka üye yok. Üye eklemek için departman ayarlarına gidin.
+                                                        Departmanda üye yok. Üye eklemek için departman ayarlarına gidin.
                                                     </p>
                                                 )}
                                             </div>

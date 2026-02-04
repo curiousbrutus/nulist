@@ -94,7 +94,23 @@ export default function OnboardingPage() {
         }
     }
 
-    const handleSkip = () => {
+    const handleSkip = async () => {
+        // Mark profile as complete even when skipping, so user won't see onboarding again
+        try {
+            await fetch('/api/profiles/onboarding', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    full_name: user?.name || profile?.full_name || '',
+                    department: profile?.department || 'Belirtilmemiş',
+                    branch: profile?.branch || 'Genel',
+                    job_title: profile?.job_title || 'Belirtilmemiş',
+                    is_profile_complete: 1
+                })
+            })
+        } catch (error) {
+            console.error('Error marking profile complete:', error)
+        }
         router.push('/')
     }
 

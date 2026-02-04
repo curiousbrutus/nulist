@@ -241,7 +241,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         const isCurrentlyCompleted = Boolean(currentStatus)
         const newStatus = !isCurrentlyCompleted
 
-        // Tasks array'ini güncelle
+        // Optimistic update - Tasks array'ini güncelle
         set({
             tasks: previousTasks.map(t => t.id === taskId ? { ...t, is_completed: newStatus } : t)
         })
@@ -251,15 +251,45 @@ export const useTaskStore = create<TaskState>((set, get) => ({
             set({ selectedTask: { ...previousSelectedTask, is_completed: newStatus } })
         }
 
-        const data = await apiCall(`/api/tasks/${taskId}`, {
-            method: 'PUT',
-            body: JSON.stringify({
-                completed: newStatus,
-                completed_at: newStatus ? new Date().toISOString() : null
+        try {
+            const res = await fetch(`/api/tasks/${taskId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    completed: newStatus
+                })
             })
-        })
 
-        if (!data) {
+            if (!res.ok) {
+                const error = await res.json()
+                console.error('Task toggle error:', error)
+                // Rollback on error
+                set({ tasks: previousTasks, selectedTask: previousSelectedTask })
+                useToastStore.getState().showToast(error.error || 'Güncelleme hatası', 'error')
+                return
+            }
+
+            const data = await res.json()
+            
+            // Update with server response to ensure consistency
+            const normalizedData = normalizeKeys(data)
+            set({
+                tasks: previousTasks.map(t => t.id === taskId ? { ...t, ...normalizedData } : t)
+            })
+            
+            if (previousSelectedTask && previousSelectedTask.id === taskId) {
+                set({ selectedTask: { ...previousSelectedTask, ...normalizedData } })
+            }
+
+            // Show success toast only if marking as completed
+            if (newStatus) {
+                useToastStore.getState().showToast('Görev tamamlandı!', 'success')
+            }
+        } catch (error: any) {
+            console.error('Task toggle error:', error)
+            // Rollback on error
             set({ tasks: previousTasks, selectedTask: previousSelectedTask })
             useToastStore.getState().showToast('Güncelleme hatası', 'error')
         }
