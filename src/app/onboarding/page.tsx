@@ -4,6 +4,7 @@ import { useAuthStore } from '@/store/useAuthStore'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { Building2, Briefcase, Phone, User, Users } from 'lucide-react'
+import { normalizeKeys } from '@/lib/utils'
 
 export default function OnboardingPage() {
     const { user, profile, setProfile } = useAuthStore()
@@ -78,13 +79,7 @@ export default function OnboardingPage() {
 
             const updatedProfile = await res.json()
             
-            // Normalize profile keys
-            const normalized: any = {}
-            for (const key of Object.keys(updatedProfile)) {
-                normalized[key.toLowerCase()] = updatedProfile[key]
-            }
-            
-            setProfile(normalized)
+            setProfile(normalizeKeys(updatedProfile))
             router.push('/')
         } catch (error) {
             console.error('Onboarding error:', error)
@@ -97,7 +92,7 @@ export default function OnboardingPage() {
     const handleSkip = async () => {
         // Mark profile as complete even when skipping, so user won't see onboarding again
         try {
-            await fetch('/api/profiles/onboarding', {
+            const res = await fetch('/api/profiles/onboarding', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -108,10 +103,22 @@ export default function OnboardingPage() {
                     is_profile_complete: true
                 })
             })
+
+            if (!res.ok) {
+                const error = await res.json()
+                console.error('Profile update error:', error)
+                alert('Profil güncellenirken hata oluştu. Lütfen tekrar deneyin.')
+                return
+            }
+
+            const updatedProfile = await res.json()
+            
+            setProfile(normalizeKeys(updatedProfile))
+            router.push('/')
         } catch (error) {
             console.error('Error marking profile complete:', error)
+            alert('Profil güncellenirken hata oluştu. Lütfen tekrar deneyin.')
         }
-        router.push('/')
     }
 
     return (

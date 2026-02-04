@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { Folder, List, Task, FolderMember, TaskAttachment } from '@/types/database'
 import { useToastStore } from '@/components/ui/toast'
+import { normalizeKeys } from '@/lib/utils'
 
 interface TaskState {
     folders: Folder[]
@@ -60,38 +61,6 @@ async function apiCall<T>(url: string, options?: RequestInit): Promise<T | null>
         console.error(`API Error (${url}):`, error.message)
         return null
     }
-}
-
-// Oracle column names uppercase olarak dönüyor, normalize edelim
-// Ayrıca Oracle'dan 0/1 olarak gelen boolean'ları true/false'a çevir
-const BOOLEAN_FIELDS = ['is_completed', 'can_add_task', 'can_assign_task', 'can_delete_task', 'can_add_list']
-
-function normalizeKeys<T>(obj: any): T {
-    if (!obj) return obj
-    if (Array.isArray(obj)) {
-        return obj.map(item => normalizeKeys(item)) as T
-    }
-    if (typeof obj === 'object') {
-        const normalized: any = {}
-        for (const key of Object.keys(obj)) {
-            const lowerKey = key.toLowerCase()
-            let value = obj[key]
-
-            // Oracle 0/1 değerlerini boolean'a çevir
-            if (BOOLEAN_FIELDS.includes(lowerKey) && (value === 0 || value === 1 || value === '0' || value === '1')) {
-                value = Boolean(Number(value))
-            }
-
-            // Nested object kontrolü (profile gibi)
-            if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
-                normalized[lowerKey] = normalizeKeys(value)
-            } else {
-                normalized[lowerKey] = value
-            }
-        }
-        return normalized as T
-    }
-    return obj
 }
 
 export const useTaskStore = create<TaskState>((set, get) => ({

@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { useAuthStore } from '@/store/useAuthStore'
 import { useTaskStore } from '@/store/useTaskStore'
+import { normalizeKeys } from '@/lib/utils'
 
 export default function AuthListener() {
     const { data: session, status } = useSession()
@@ -31,12 +32,7 @@ export default function AuthListener() {
                     const res = await fetch('/api/profiles/me')
                     if (res.ok) {
                         const profileData = await res.json()
-                        // Normalize keys to lowercase
-                        const normalized: Record<string, unknown> = {}
-                        for (const key of Object.keys(profileData)) {
-                            normalized[key.toLowerCase()] = profileData[key]
-                        }
-                        setProfile(normalized)
+                        setProfile(normalizeKeys(profileData))
                     } else {
                         // Fallback to basic profile from session
                         setProfile({
