@@ -1,0 +1,2 @@
+ALTER TABLE tasks ADD legacy_id VARCHAR2(255);
+EXIT;

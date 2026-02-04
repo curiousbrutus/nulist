@@ -1,0 +1,2 @@
+ALTER TABLE tasks ADD meeting_date TIMESTAMP WITH TIME ZONE;
+EXIT;
