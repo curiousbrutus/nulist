@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Plus, Folder as FolderIcon, List as ListIcon, ChevronDown, ChevronRight, LogOut, Search, Settings, Trash2, Edit3, X as CloseIcon, Sun, Moon, Menu, Users, UserCheck, BarChart, Upload, Shield } from 'lucide-react'
+import { Plus, Folder as FolderIcon, List as ListIcon, ChevronDown, ChevronRight, LogOut, Search, Settings, Trash2, Edit3, X as CloseIcon, Sun, Moon, Menu, Users, UserCheck, BarChart, Upload, Shield, Pin } from 'lucide-react'
 import { InitialsAvatar } from '@/components/ui/InitialsAvatar'
 import FolderMemberModal from './FolderMemberModal'
 import Link from 'next/link'
@@ -330,7 +330,18 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                         </div>
 
                         <div className="space-y-1">
-                            {folders.filter(f => !f.parent_id).map((folder, fIndex) => (
+                            {folders
+                                .filter(f => !f.parent_id)
+                                .sort((a, b) => {
+                                    // Sort by: 1) pinned status (pinned first), 2) display_order, 3) title
+                                    if (a.is_pinned && !b.is_pinned) return -1
+                                    if (!a.is_pinned && b.is_pinned) return 1
+                                    if (a.display_order !== b.display_order) {
+                                        return (a.display_order || 999) - (b.display_order || 999)
+                                    }
+                                    return (a.title || '').localeCompare(b.title || '', 'tr')
+                                })
+                                .map((folder, fIndex) => (
                                 <div key={folder.id || `folder-${fIndex}`} className="space-y-0.5">
                                     {/* Top Level Folder (Department) */}
                                     <div className="flex items-center group relative">
@@ -361,7 +372,12 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                                                     onClick={(e) => e.stopPropagation()}
                                                 />
                                             ) : (
-                                                <span className="truncate flex-1 font-bold">{folder.title}</span>
+                                                <span className="truncate flex-1 font-bold flex items-center gap-1.5">
+                                                    {folder.title}
+                                                    {folder.is_pinned && (
+                                                        <Pin className="h-3 w-3 text-orange-400 fill-orange-400/50" title="Sabitlenmiş" />
+                                                    )}
+                                                </span>
                                             )}
                                         </div>
                                         <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity px-1">

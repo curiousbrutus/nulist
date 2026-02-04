@@ -342,10 +342,11 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
                                         {/* Sorumlu Ekleme/Çıkarma - Controlled by canAssign permission */}
                                         {canAssign && (
                                             <div className="pt-2">
-                                                {membersOfFolder.length > 0 ? (
-                                                    <>
-                                                        <label className="text-[10px] font-bold text-muted-foreground uppercase mb-2 block">Departmandan Sorumlu Ata</label>
-                                                        <div className="flex flex-wrap gap-2 mb-3">
+                                                {/* Department Members Quick Access */}
+                                                {membersOfFolder.length > 0 && (
+                                                    <div className="mb-3">
+                                                        <label className="text-[10px] font-bold text-muted-foreground uppercase mb-2 block">Departman Üyeleri</label>
+                                                        <div className="flex flex-wrap gap-2">
                                                             {membersOfFolder
                                                                 .filter(member => member.user_id !== task.created_by) // Görevi oluşturanı gösterme
                                                                 .map(member => {
@@ -355,7 +356,7 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
                                                                             key={member.user_id}
                                                                             onClick={() => handleToggleAssignee(member.user_id)}
                                                                             className={clsx(
-                                                                                "h-10 w-10 rounded-full border-2 transition-all hover:scale-110 relative",
+                                                                                "h-10 w-10 rounded-full border-2 transition-all hover:scale-110 relative group",
                                                                                 isAssigned
                                                                                     ? "border-primary ring-2 ring-primary/30 shadow-lg shadow-primary/20"
                                                                                     : "border-muted/30 opacity-60 grayscale hover:grayscale-0 hover:opacity-100 hover:border-primary/50"
@@ -380,26 +381,28 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
                                                                     )
                                                                 })}
                                                         </div>
-                                                    </>
-                                                ) : null}
+                                                    </div>
+                                                )}
                                                 
-                                                {/* Global User Search - Always Visible if canAssign */}
-                                                <div className="mt-1 relative border-t border-dashed border-muted/50 pt-3">
+                                                {/* Unified Global User Search */}
+                                                <div className={clsx("relative", membersOfFolder.length > 0 && "border-t border-dashed border-muted/30 pt-3")}>
                                                     <div className="flex items-center gap-2 mb-2">
                                                         <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
                                                             <Search className="h-3.5 w-3.5 text-primary" />
                                                         </div>
-                                                        <label className="text-[10px] font-bold text-foreground uppercase tracking-wider">Tüm Personel Listesinde Ara</label>
+                                                        <label className="text-[10px] font-bold text-foreground uppercase tracking-wider">
+                                                            {membersOfFolder.length > 0 ? 'Diğer Personellerde Ara' : 'Personel Ara'}
+                                                        </label>
                                                     </div>
                                                     <Input 
-                                                        placeholder="İsim ile personel arayın..." 
+                                                        placeholder="İsim veya email ile arayın..." 
                                                         className="h-9 text-xs bg-muted/30 focus:bg-background transition-colors border-muted hover:border-primary/50"
                                                         value={userSearchQuery}
                                                         onChange={e => setUserSearchQuery(e.target.value)}
                                                     />
                                                     
                                                     {userSearchQuery.length >= 2 && (
-                                                        <div className="absolute top-full left-0 right-0 bg-popover border shadow-xl rounded-lg mt-1 z-50 max-h-48 overflow-y-auto overflow-x-hidden">
+                                                        <div className="absolute top-full left-0 right-0 bg-popover border shadow-xl rounded-lg mt-1 z-50 max-h-60 overflow-y-auto">
                                                             {isSearchingUser ? (
                                                                 <div className="p-3 text-xs text-muted-foreground text-center">Aranıyor...</div>
                                                             ) : foundUsers.length === 0 ? (
@@ -407,7 +410,6 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
                                                             ) : (
                                                                 foundUsers.map(u => {
                                                                      const isAssigned = task?.task_assignees?.some(ta => ta.user_id === u.id)
-                                                                     // Check if already in the list above to avoid confusion, but allowing "Add" regardless is the requested feature
                                                                      return (
                                                                         <button
                                                                             key={u.id}
@@ -415,25 +417,38 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
                                                                                 if (u.id) {
                                                                                     handleToggleAssignee(u.id)
                                                                                     if (!isAssigned) {
-                                                                                        showToast(`${u.full_name} eklendi`, 'success')
+                                                                                        showToast(`${u.full_name} atandı`, 'success')
                                                                                     }
                                                                                     setUserSearchQuery('')
                                                                                     setFoundUsers([])
                                                                                 }
                                                                             }}
-                                                                            className="w-full flex items-center gap-2 p-2 hover:bg-accent text-left text-xs transition-colors border-b border-muted/50 last:border-0"
+                                                                            className={clsx(
+                                                                                "w-full flex items-center gap-2 p-2 text-left text-xs transition-colors border-b border-muted/50 last:border-0",
+                                                                                isAssigned 
+                                                                                    ? "bg-primary/10 hover:bg-primary/20" 
+                                                                                    : "hover:bg-accent"
+                                                                            )}
                                                                         >
-                                                                            <InitialsAvatar name={u.full_name} email={u.email} className="h-6 w-6 rounded-full shrink-0" textClassName="text-[9px]" />
+                                                                            <InitialsAvatar 
+                                                                                name={u.full_name} 
+                                                                                email={u.email} 
+                                                                                className={clsx(
+                                                                                    "h-7 w-7 rounded-full shrink-0",
+                                                                                    isAssigned && "ring-2 ring-primary"
+                                                                                )} 
+                                                                                textClassName="text-[9px]" 
+                                                                            />
                                                                             <div className="flex-1 overflow-hidden">
                                                                                 <p className="truncate font-medium">{u.full_name}</p>
                                                                                 <p className="truncate text-[9px] text-muted-foreground">{u.email}</p>
                                                                             </div>
                                                                             {isAssigned ? (
-                                                                                <div className="h-5 w-5 bg-green-500/10 text-green-600 rounded-full flex items-center justify-center shrink-0">
-                                                                                    <CheckCircle2 className="h-3 w-3" />
+                                                                                <div className="h-5 w-5 bg-primary/20 text-primary rounded-full flex items-center justify-center shrink-0">
+                                                                                    <CheckCircle2 className="h-3 w-3 fill-primary" />
                                                                                 </div>
                                                                             ) : (
-                                                                                <div className="h-5 w-5 bg-primary/5 text-primary rounded-full flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-100">
+                                                                                <div className="h-5 w-5 bg-muted/20 text-muted-foreground rounded-full flex items-center justify-center shrink-0 group-hover:bg-primary/10 group-hover:text-primary transition-all">
                                                                                     <Plus className="h-3 w-3" />
                                                                                 </div>
                                                                             )}
