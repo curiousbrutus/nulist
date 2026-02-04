@@ -105,9 +105,15 @@ export default function OnboardingPage() {
             })
 
             if (!res.ok) {
-                const error = await res.json()
-                console.error('Profile update error:', error)
-                alert('Profil güncellenirken hata oluştu. Lütfen tekrar deneyin.')
+                let errorMessage = 'Profil güncellenirken hata oluştu. Lütfen tekrar deneyin.'
+                try {
+                    const error = await res.json()
+                    errorMessage = error.error || errorMessage
+                } catch {
+                    // If JSON parsing fails, use default error message
+                }
+                console.error('Profile update error:', errorMessage)
+                alert(errorMessage)
                 return
             }
 

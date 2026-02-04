@@ -232,11 +232,17 @@ export const useTaskStore = create<TaskState>((set, get) => ({
             })
 
             if (!res.ok) {
-                const error = await res.json()
-                console.error('Task toggle error:', error)
+                let errorMessage = 'Güncelleme hatası'
+                try {
+                    const error = await res.json()
+                    errorMessage = error.error || errorMessage
+                } catch {
+                    // If JSON parsing fails, use default error message
+                }
+                console.error('Task toggle error:', errorMessage)
                 // Rollback on error
                 set({ tasks: previousTasks, selectedTask: previousSelectedTask })
-                useToastStore.getState().showToast(error.error || 'Güncelleme hatası', 'error')
+                useToastStore.getState().showToast(errorMessage, 'error')
                 return
             }
 

@@ -9,7 +9,7 @@ export function cn(...inputs: ClassValue[]) {
 // Also convert Oracle 0/1 values to boolean for specified fields
 const BOOLEAN_FIELDS = ['is_completed', 'can_add_task', 'can_assign_task', 'can_delete_task', 'can_add_list', 'is_profile_complete']
 
-export function normalizeKeys<T>(obj: unknown): T {
+export function normalizeKeys<T = Record<string, unknown>>(obj: unknown): T {
     if (!obj) return obj as T
     if (Array.isArray(obj)) {
         return obj.map(item => normalizeKeys(item)) as T
