@@ -252,7 +252,7 @@ export default function TasksManagement() {
                                                         <div className="flex flex-wrap gap-1">
                                                             {task.assignees?.slice(0, 2).map(a => (
                                                                 <span key={a.user_id} className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-blue-100 px-2 py-1 rounded">
-                                                                    {a.profile?.full_name || 'N/A'}
+                                                                    {a.full_name || a.profile?.full_name || 'N/A'}
                                                                 </span>
                                                             ))}
                                                             {(task.assignees?.length || 0) > 2 && (
@@ -326,7 +326,7 @@ export default function TasksManagement() {
                                         {selectedTask.assignees?.map(a => (
                                             <div key={a.user_id} className="flex items-center justify-between p-2 bg-gray-100 dark:bg-gray-700 rounded-md">
                                                 <span className="text-sm text-gray-900 dark:text-white">
-                                                    {a.profile?.full_name || 'N/A'}
+                                                    {a.full_name || a.profile?.full_name || 'N/A'}
                                                 </span>
                                                 <span className={`text-xs ${a.is_completed ? 'text-green-600' : 'text-orange-600'}`}>
                                                     {a.is_completed ? '✓' : '○'}
@@ -338,6 +338,37 @@ export default function TasksManagement() {
 
                                 {/* Actions */}
                                 <div className="space-y-2 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                    <Button
+                                        className="w-full bg-indigo-600 hover:bg-indigo-700"
+                                        size="sm"
+                                        onClick={async () => {
+                                            try {
+                                                showToast('Zimbra senkronizasyonu başlatıldı...', 'info')
+                                                const res = await fetch(`/api/admin/tasks/${selectedTask.id}/sync`, { method: 'POST' })
+                                                const data = await res.json()
+                                                
+                                                if (res.ok) {
+                                                    const successCount = data.results.filter((r: any) => ['created', 'updated', 're-created'].includes(r.status)).length
+                                                    const failCount = data.results.filter((r: any) => r.status === 'failed' || r.status === 'error').length
+                                                    
+                                                    if (successCount > 0) {
+                                                       showToast(`${successCount} kullanıcı için Zimbra senkronizasyonu tamamlandı`, 'success')
+                                                    } else if (failCount > 0) {
+                                                       showToast(`Senkronizasyon hatası: ${failCount} başarısız`, 'error') 
+                                                    } else {
+                                                       showToast('Senkronize edilecek uygun kullanıcı bulunamadı (Sync kapalı olabilir)', 'info')
+                                                    }
+                                                } else {
+                                                    showToast(`Hata: ${data.error}`, 'error')
+                                                }
+                                            } catch (e) {
+                                                console.error(e)
+                                                showToast('Senkronizasyon sırasında hata oluştu', 'error')
+                                            }
+                                        }}
+                                    >
+                                        ⟳ Zimbra Sync
+                                    </Button>
                                     <Button
                                         className="w-full bg-blue-600 hover:bg-blue-700"
                                         size="sm"

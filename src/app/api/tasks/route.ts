@@ -33,7 +33,7 @@ function normalizePriorityFromDB(priority: any): string {
     return PRIORITY_FROM_DB[priority] || 'medium'
 }
 
-// GET /api/tasks - Tasks listele
+// GET /api/tasks - Tasks listele (sadece kullanıcının görebildiği görevler)
 export async function GET(request: NextRequest) {
     try {
         const session = await auth()
@@ -44,17 +44,33 @@ export async function GET(request: NextRequest) {
         const { searchParams } = new URL(request.url)
         const listId = searchParams.get('list_id')
 
+        // Kullanıcının görebileceği görevler:
+        // 1. Kendisine atanan görevler (task_assignees üzerinden)
+        // 2. Kendi oluşturduğu görevler (created_by)
+        // 3. Üyesi olduğu folder'lardaki görevler (folder_members üzerinden)
+        // 4. Sahip olduğu folder'lardaki görevler (folders.user_id)
         let sql = `
-            SELECT DISTINCT t.*,
+            SELECT t.*,
                    (SELECT COUNT(*) FROM task_assignees ta WHERE ta.task_id = t.id) as assignee_count,
                    (SELECT COUNT(*) FROM comments c WHERE c.task_id = t.id) as comment_count
             FROM tasks t
+            JOIN lists l ON t.list_id = l.id
+            WHERE (
+                -- Kendisine atanan görevler
+                t.id IN (SELECT task_id FROM task_assignees WHERE user_id = :user_id)
+                -- Kendi oluşturduğu görevler
+                OR t.created_by = :user_id
+                -- Üyesi olduğu folder'lardaki görevler
+                OR l.folder_id IN (SELECT folder_id FROM folder_members WHERE user_id = :user_id)
+                -- Sahip olduğu folder'lardaki görevler
+                OR l.folder_id IN (SELECT id FROM folders WHERE user_id = :user_id)
+            )
         `
 
-        const params: any = {}
+        const params: any = { user_id: session.user.id }
 
         if (listId) {
-            sql += ' WHERE t.list_id = :list_id'
+            sql += ' AND t.list_id = :list_id'
             params.list_id = listId
         }
 

@@ -55,6 +55,8 @@ export interface TaskAssignee {
     is_completed: boolean;
     assigned_at?: string;
     profile?: Profile; // Join'ler için opsiyonel
+    full_name?: string; // Admin view shortcut
+    zimbra_task_id?: string;
 }
 
 export interface TaskAttachment {

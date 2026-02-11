@@ -21,10 +21,15 @@ export async function GET(request: NextRequest) {
              WHERE ta.task_id IN (
                  SELECT t.id FROM tasks t
                  JOIN lists l ON t.list_id = l.id
-                 WHERE l.folder_id IN (
-                     SELECT id FROM folders WHERE user_id = :user_id
-                     UNION
-                     SELECT folder_id FROM folder_members WHERE user_id = :user_id
+                 WHERE (
+                     -- Kendisine atanan görevler
+                     t.id IN (SELECT task_id FROM task_assignees WHERE user_id = :user_id)
+                     -- Kendi oluşturduğu görevler
+                     OR t.created_by = :user_id
+                     -- Üyesi olduğu folder'lardaki görevler
+                     OR l.folder_id IN (SELECT folder_id FROM folder_members WHERE user_id = :user_id)
+                     -- Sahip olduğu folder'lardaki görevler
+                     OR l.folder_id IN (SELECT id FROM folders WHERE user_id = :user_id)
                  )
              )
              ORDER BY ta.assigned_at DESC`,

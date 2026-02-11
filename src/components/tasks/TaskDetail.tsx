@@ -34,33 +34,61 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
     const [foundUsers, setFoundUsers] = useState<Profile[]>([])
     const [isSearchingUser, setIsSearchingUser] = useState(false)
 
+    // Auto-load ALL users for secretaries/admins (no search needed)
     useEffect(() => {
-        if (userSearchQuery.length < 2) {
-            setFoundUsers([])
-            return
-        }
-        const timer = setTimeout(async () => {
-            setIsSearchingUser(true)
-            try {
-                const res = await fetch(`/api/profiles?q=${encodeURIComponent(userSearchQuery)}`)
-                if (res.ok) {
-                    const data = await res.json()
-                    // Normalize keys
-                    const normalized = data.map((p: any) => {
-                        const n: any = {}
-                        for (const k of Object.keys(p)) {
-                            n[k.toLowerCase()] = p[k]
-                        }
-                        return n as Profile
-                    })
-                    setFoundUsers(normalized)
+        if (profile?.role === 'secretary' || profile?.role === 'admin' || profile?.role === 'superadmin') {
+            const fetchAllUsers = async () => {
+                setIsSearchingUser(true)
+                try {
+                    const res = await fetch('/api/profiles')
+                    if (res.ok) {
+                        const data = await res.json()
+                        const normalized = data.map((p: any) => {
+                            const n: any = {}
+                            for (const k of Object.keys(p)) {
+                                n[k.toLowerCase()] = p[k]
+                            }
+                            return n as Profile
+                        })
+                        setFoundUsers(normalized)
+                    }
+                } finally {
+                    setIsSearchingUser(false)
                 }
-            } finally {
-                setIsSearchingUser(false)
             }
-        }, 300)
-        return () => clearTimeout(timer)
-    }, [userSearchQuery])
+            fetchAllUsers()
+        }
+    }, [profile?.role])
+
+    // Regular users still use search
+    useEffect(() => {
+        if (profile?.role === 'user') {
+            if (userSearchQuery.length < 2) {
+                setFoundUsers([])
+                return
+            }
+            const timer = setTimeout(async () => {
+                setIsSearchingUser(true)
+                try {
+                    const res = await fetch(`/api/profiles?q=${encodeURIComponent(userSearchQuery)}`)
+                    if (res.ok) {
+                        const data = await res.json()
+                        const normalized = data.map((p: any) => {
+                            const n: any = {}
+                            for (const k of Object.keys(p)) {
+                                n[k.toLowerCase()] = p[k]
+                            }
+                            return n as Profile
+                        })
+                        setFoundUsers(normalized)
+                    }
+                } finally {
+                    setIsSearchingUser(false)
+                }
+            }, 300)
+            return () => clearTimeout(timer)
+        }
+    }, [userSearchQuery, profile?.role])
     const [notes, setNotes] = useState(task?.notes || '')
     const [isConfirmOpen, setIsConfirmOpen] = useState(false)
     const [newComment, setNewComment] = useState('')
@@ -99,7 +127,19 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
     // - Be the folder owner, OR
     // - Have can_assign_task permission in the folder, OR
     // - Be the task creator (can assign their own tasks)
-    const canAssign = isAdmin || isOwner || currentMembership?.can_assign_task || isTaskCreator
+    // - Have can_add_task (Broadened per request: Task creators/adders should see global list)
+    // - Be a secretary in the same branch (NEW: Branch-based access for secretaries)
+    const isSecretary = profile?.role === 'secretary'
+    const taskBranch = task?.branch || taskFolder?.branch
+    const isSameBranchSecretary = isSecretary && profile?.branch === taskBranch
+
+    const canAssign = 
+        isAdmin || 
+        isOwner || 
+        isSameBranchSecretary ||  // NEW: Secretary in same branch can assign
+        currentMembership?.can_assign_task || 
+        isTaskCreator || 
+        currentMembership?.can_add_task
 
     // İlerleme Hesaplama
     const totalAssignees = task?.task_assignees?.length || 0
@@ -339,128 +379,145 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
                                             </div>
                                         )}
 
-                                        {/* Sorumlu Ekleme/Çıkarma - Controlled by canAssign permission */}
-                                        {canAssign && (
-                                            <div className="pt-2">
-                                                {/* Department Members Quick Access */}
-                                                {membersOfFolder.length > 0 && (
-                                                    <div className="mb-3">
-                                                        <label className="text-[10px] font-bold text-muted-foreground uppercase mb-2 block">Departman Üyeleri</label>
-                                                        <div className="flex flex-wrap gap-2">
-                                                            {membersOfFolder
-                                                                .filter(member => member.user_id !== task.created_by) // Görevi oluşturanı gösterme
-                                                                .map(member => {
-                                                                    const isAssigned = task.task_assignees?.some(ta => ta.user_id === member.user_id)
-                                                                    return (
-                                                                        <button
-                                                                            key={member.user_id}
-                                                                            onClick={() => handleToggleAssignee(member.user_id)}
+                                        {/* Sorumlu Ekleme/Çıkarma */}
+                                        <div className="pt-2">
+                                            {/* Department Members Quick Access */}
+                                            {membersOfFolder.length > 0 && (
+                                                <div className={clsx("mb-3", !canAssign && "opacity-60 grayscale")}>
+                                                    <label className="text-[10px] font-bold text-muted-foreground uppercase mb-2 block">
+                                                        Departman Üyeleri {(!canAssign) && "(Yetki Yok)"}
+                                                    </label>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {membersOfFolder
+                                                            .filter(member => member.user_id !== task.created_by) // Görevi oluşturanı gösterme
+                                                            .map(member => {
+                                                                const isAssigned = task.task_assignees?.some(ta => ta.user_id === member.user_id)
+                                                                return (
+                                                                    <button
+                                                                        key={member.user_id}
+                                                                        onClick={() => canAssign && handleToggleAssignee(member.user_id)}
+                                                                        disabled={!canAssign}
+                                                                        className={clsx(
+                                                                            "h-10 w-10 rounded-full border-2 transition-all relative group",
+                                                                            isAssigned
+                                                                                ? "border-primary ring-2 ring-primary/30 shadow-lg shadow-primary/20"
+                                                                                : "border-muted/30 opacity-60 grayscale hover:grayscale-0 hover:opacity-100 hover:border-primary/50",
+                                                                            canAssign && "hover:scale-110",
+                                                                            !canAssign && "cursor-not-allowed"
+                                                                        )}
+                                                                        title={`${member.profile?.full_name || member.profile?.email} ${isAssigned ? '(Atandı)' : ''}`}
+                                                                    >
+                                                                        <InitialsAvatar
+                                                                            name={member.profile?.full_name}
+                                                                            email={member.profile?.email}
                                                                             className={clsx(
-                                                                                "h-10 w-10 rounded-full border-2 transition-all hover:scale-110 relative group",
-                                                                                isAssigned
-                                                                                    ? "border-primary ring-2 ring-primary/30 shadow-lg shadow-primary/20"
-                                                                                    : "border-muted/30 opacity-60 grayscale hover:grayscale-0 hover:opacity-100 hover:border-primary/50"
+                                                                                "w-full h-full rounded-full",
+                                                                                isAssigned ? "ring-2 ring-primary/40" : ""
                                                                             )}
-                                                                            title={`${member.profile?.full_name || member.profile?.email} ${isAssigned ? '(Atandı)' : ''}`}
-                                                                        >
-                                                                            <InitialsAvatar
-                                                                                name={member.profile?.full_name}
-                                                                                email={member.profile?.email}
-                                                                                className={clsx(
-                                                                                    "w-full h-full rounded-full",
-                                                                                    isAssigned ? "ring-2 ring-primary/40" : ""
-                                                                                )}
-                                                                                textClassName="text-xs"
-                                                                            />
-                                                                            {isAssigned && (
-                                                                                <div className="absolute -top-1 -right-1 h-4 w-4 bg-primary rounded-full flex items-center justify-center">
-                                                                                    <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
-                                                                                </div>
-                                                                            )}
-                                                                        </button>
-                                                                    )
-                                                                })}
-                                                        </div>
+                                                                            textClassName="text-xs"
+                                                                        />
+                                                                        {isAssigned && (
+                                                                            <div className="absolute -top-1 -right-1 h-4 w-4 bg-primary rounded-full flex items-center justify-center">
+                                                                                <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
+                                                                            </div>
+                                                                        )}
+                                                                    </button>
+                                                                )
+                                                            })}
                                                     </div>
-                                                )}
+                                                </div>
+                                            )}
+                                            
+                                            {/* Unified Global User Search */}
+                                            <div className="relative border-t border-dashed border-muted/30 pt-3 mt-3">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <div className={clsx("h-6 w-6 rounded-full flex items-center justify-center", canAssign ? "bg-primary/10" : "bg-muted")}>
+                                                        <Search className={clsx("h-3.5 w-3.5", canAssign ? "text-primary" : "text-muted-foreground")} />
+                                                    </div>
+                                                    <label className="text-[10px] font-bold text-foreground uppercase tracking-wider">
+                                                        Sorumlu Ara / Ekle
+                                                    </label>
+                                                </div>
                                                 
-                                                {/* Unified Global User Search */}
-                                                <div className="relative border-t border-dashed border-muted/30 pt-3 mt-3">
-                                                    <div className="flex items-center gap-2 mb-2">
-                                                        <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
-                                                            <Search className="h-3.5 w-3.5 text-primary" />
-                                                        </div>
-                                                        <label className="text-[10px] font-bold text-foreground uppercase tracking-wider">
-                                                            Tüm Personellerde Ara (Global)
-                                                        </label>
-                                                    </div>
+                                                <div className="group relative">
                                                     <Input 
-                                                        placeholder="İsim veya email ile arayın..." 
-                                                        className="h-9 text-xs bg-muted/30 focus:bg-background transition-colors border-muted hover:border-primary/50"
+                                                        placeholder={canAssign ? "İsim veya email ile arayın..." : "Atama yetkiniz bulunmuyor"}
+                                                        className={clsx(
+                                                            "h-9 text-xs bg-muted/30 focus:bg-background transition-colors border-muted hover:border-primary/50",
+                                                            !canAssign && "opacity-60 cursor-not-allowed bg-muted/50"
+                                                        )}
                                                         value={userSearchQuery}
                                                         onChange={e => setUserSearchQuery(e.target.value)}
+                                                        disabled={!canAssign}
                                                     />
                                                     
-                                                    {userSearchQuery.length >= 2 && (
-                                                        <div className="absolute top-full left-0 right-0 bg-popover border shadow-xl rounded-lg mt-1 z-50 max-h-60 overflow-y-auto">
-                                                            {isSearchingUser ? (
-                                                                <div className="p-3 text-xs text-muted-foreground text-center">Aranıyor...</div>
-                                                            ) : foundUsers.length === 0 ? (
-                                                                <div className="p-3 text-xs text-muted-foreground text-center">Sonuç bulunamadı</div>
-                                                            ) : (
-                                                                foundUsers.map(u => {
-                                                                     const isAssigned = task?.task_assignees?.some(ta => ta.user_id === u.id)
-                                                                     return (
-                                                                        <button
-                                                                            key={u.id}
-                                                                            onClick={() => {
-                                                                                if (u.id) {
-                                                                                    handleToggleAssignee(u.id)
-                                                                                    if (!isAssigned) {
-                                                                                        showToast(`${u.full_name} atandı`, 'success')
-                                                                                    }
-                                                                                    setUserSearchQuery('')
-                                                                                    setFoundUsers([])
-                                                                                }
-                                                                            }}
-                                                                            className={clsx(
-                                                                                "w-full flex items-center gap-2 p-2 text-left text-xs transition-colors border-b border-muted/50 last:border-0",
-                                                                                isAssigned 
-                                                                                    ? "bg-primary/10 hover:bg-primary/20" 
-                                                                                    : "hover:bg-accent"
-                                                                            )}
-                                                                        >
-                                                                            <InitialsAvatar 
-                                                                                name={u.full_name} 
-                                                                                email={u.email} 
-                                                                                className={clsx(
-                                                                                    "h-7 w-7 rounded-full shrink-0",
-                                                                                    isAssigned && "ring-2 ring-primary"
-                                                                                )} 
-                                                                                textClassName="text-[9px]" 
-                                                                            />
-                                                                            <div className="flex-1 overflow-hidden">
-                                                                                <p className="truncate font-medium">{u.full_name}</p>
-                                                                                <p className="truncate text-[9px] text-muted-foreground">{u.email}</p>
-                                                                            </div>
-                                                                            {isAssigned ? (
-                                                                                <div className="h-5 w-5 bg-primary/20 text-primary rounded-full flex items-center justify-center shrink-0">
-                                                                                    <CheckCircle2 className="h-3 w-3 fill-primary" />
-                                                                                </div>
-                                                                            ) : (
-                                                                                <div className="h-5 w-5 bg-muted/20 text-muted-foreground rounded-full flex items-center justify-center shrink-0 group-hover:bg-primary/10 group-hover:text-primary transition-all">
-                                                                                    <Plus className="h-3 w-3" />
-                                                                                </div>
-                                                                            )}
-                                                                        </button>
-                                                                     )
-                                                                })
-                                                            )}
+                                                    {/* Yetki Yoksa Kilit İkonu */}
+                                                    {!canAssign && (
+                                                        <div className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" title="Yetkiniz yok">
+                                                             <AlertOctagon className="h-4 w-4" />
                                                         </div>
                                                     )}
                                                 </div>
+                                                
+                                                {canAssign && userSearchQuery.length >= 2 && (
+                                                    <div className="absolute top-full left-0 right-0 bg-popover border shadow-xl rounded-lg mt-1 z-[60] max-h-60 overflow-y-auto">
+                                                        {isSearchingUser ? (
+                                                            <div className="p-3 text-xs text-muted-foreground text-center">Aranıyor...</div>
+                                                        ) : foundUsers.length === 0 ? (
+                                                            <div className="p-3 text-xs text-muted-foreground text-center">Sonuç bulunamadı</div>
+                                                        ) : (
+                                                            foundUsers.map(u => {
+                                                                 const isAssigned = task?.task_assignees?.some(ta => ta.user_id === u.id)
+                                                                 return (
+                                                                    <button
+                                                                        key={u.id}
+                                                                        onClick={() => {
+                                                                            if (u.id) {
+                                                                                handleToggleAssignee(u.id)
+                                                                                if (!isAssigned) {
+                                                                                    showToast(`${u.full_name} atandı`, 'success')
+                                                                                }
+                                                                                setUserSearchQuery('')
+                                                                                setFoundUsers([])
+                                                                            }
+                                                                        }}
+                                                                        className={clsx(
+                                                                            "w-full flex items-center gap-2 p-2 text-left text-xs transition-colors border-b border-muted/50 last:border-0",
+                                                                            isAssigned 
+                                                                                ? "bg-primary/10 hover:bg-primary/20" 
+                                                                                : "hover:bg-accent"
+                                                                            )}
+                                                                    >
+                                                                        <InitialsAvatar 
+                                                                            name={u.full_name} 
+                                                                            email={u.email} 
+                                                                            className={clsx(
+                                                                                "h-7 w-7 rounded-full shrink-0",
+                                                                                isAssigned && "ring-2 ring-primary"
+                                                                            )} 
+                                                                            textClassName="text-[9px]" 
+                                                                        />
+                                                                        <div className="flex-1 overflow-hidden">
+                                                                            <p className="truncate font-medium">{u.full_name}</p>
+                                                                            <p className="truncate text-[9px] text-muted-foreground">{u.email}</p>
+                                                                        </div>
+                                                                        {isAssigned ? (
+                                                                            <div className="h-5 w-5 bg-primary/20 text-primary rounded-full flex items-center justify-center shrink-0">
+                                                                                <CheckCircle2 className="h-3 w-3 fill-primary" />
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div className="h-5 w-5 bg-muted/20 text-muted-foreground rounded-full flex items-center justify-center shrink-0 group-hover:bg-primary/10 group-hover:text-primary transition-all">
+                                                                                <Plus className="h-3 w-3" />
+                                                                            </div>
+                                                                        )}
+                                                                    </button>
+                                                                 )
+                                                            })
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
-                                        )}
+                                        </div>
                                     </div>
 
                                     <div className="h-px bg-muted/50 mx-1" />

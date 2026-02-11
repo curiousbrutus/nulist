@@ -86,6 +86,103 @@ async function getAdminAuthToken(): Promise<string> {
     })
 }
 
+// Get delegate auth token for a specific user
+async function getDelegateAuthToken(userEmail: string): Promise<string> {
+    try {
+        const adminToken = await getAdminAuthToken()
+        
+        const soapBody = `<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
+  <soap:Header>
+    <context xmlns="urn:zimbra">
+      <authToken>${adminToken}</authToken>
+    </context>
+  </soap:Header>
+  <soap:Body>
+    <DelegateAuthRequest xmlns="urn:zimbraAdmin">
+      <account by="name">${userEmail}</account>
+    </DelegateAuthRequest>
+  </soap:Body>
+</soap:Envelope>`
+
+        return new Promise((resolve, reject) => {
+            const req = https.request({
+                hostname: ZIMBRA_HOST,
+                port: ZIMBRA_ADMIN_PORT,
+                path: '/service/admin/soap',
+                method: 'POST',
+                headers: { 'Content-Type': 'application/soap+xml' },
+                rejectUnauthorized: false
+            }, (res) => {
+                let data = ''
+                res.on('data', c => data += c)
+                res.on('end', () => {
+                    const match = data.match(/<authToken[^>]*>([^<]+)<\/authToken>/)
+                    if (match) {
+                        resolve(match[1])
+                    } else {
+                        reject(new Error('Delegate auth failed'))
+                    }
+                })
+            })
+            req.on('error', reject)
+            req.write(soapBody)
+            req.end()
+        })
+    } catch (error) {
+        throw error
+    }
+}
+
+// Get user tasks as JSON using REST API
+export async function getZimbraTasksJSON(userEmail: string): Promise<any[]> {
+    try {
+        const authToken = await getDelegateAuthToken(userEmail)
+        
+        return new Promise((resolve, reject) => {
+            const req = https.request({
+                hostname: ZIMBRA_HOST,
+                port: ZIMBRA_CALDAV_PORT, // Using 443 (Webmail port) for REST
+                path: `/home/${userEmail}/tasks?fmt=json`,
+                method: 'GET',
+                headers: { 
+                    'Cookie': `ZM_AUTH_TOKEN=${authToken}` 
+                },
+                rejectUnauthorized: false
+            }, (res) => {
+                let data = ''
+                res.on('data', c => data += c)
+                res.on('end', () => {
+                    if (res.statusCode === 200) {
+                        try {
+                            const json = JSON.parse(data)
+                            // Structure is usually { tasks: [ ... ] } or simple array depending on Zimbra version
+                            // Zimbra JSON often wraps: { "tasks": [ ... ] }
+                            const result = json.tasks || json || []
+                            resolve(Array.isArray(result) ? result : [])
+                        } catch (e) {
+                            console.error('JSON Parse error for user ' + userEmail, e)
+                             resolve([]) // Return empty array on parse error to avoid crashing
+                        }
+                    } else {
+                         // reject(new Error(`REST API Error: ${res.statusCode}`))
+                         console.error(`REST API failure for ${userEmail}: ${res.statusCode}`)
+                         resolve([]) // Return empty to skip but not crash entire loop
+                    }
+                })
+            })
+            req.on('error', (err) => {
+                console.error('Request error', err)
+                resolve([])
+            })
+            req.end()
+        })
+    } catch (error) {
+        console.error('getZimbraTasksJSON error:', error)
+        return []
+    }
+}
+
 // Create task via Admin SOAP API (no sharing required)
 export async function createZimbraTaskViaAdminAPI(
     userEmail: string,
@@ -116,7 +213,7 @@ export async function createZimbraTaskViaAdminAPI(
   </soap:Header>
   <soap:Body>
     <CreateTaskRequest xmlns="urn:zimbraMail">
-      <m>
+      <m l="15">
         <inv>
           <comp name="${escapeXml(task.title)}" status="NEED" priority="${priority}" percentComplete="0">
             <s d="${dueDate}"/>
@@ -160,6 +257,229 @@ export async function createZimbraTaskViaAdminAPI(
                             success: false,
                             error: fault ? fault[1] : 'Unknown SOAP error'
                         })
+                    }
+                })
+            })
+            req.on('error', (e) => resolve({ success: false, error: e.message }))
+            req.write(soapBody)
+            req.end()
+        })
+    } catch (error) {
+        return { success: false, error: (error as Error).message }
+    }
+}
+
+// Update task via Admin SOAP API
+export async function updateZimbraTaskViaAdminAPI(
+    userEmail: string,
+    zimbraTaskId: string,
+    updates: {
+        title?: string
+        notes?: string
+        due_date?: string | Date
+        priority?: string
+        is_completed?: boolean
+    }
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        const token = await getAdminAuthToken()
+        
+        let priority = 5
+        if (updates.priority) {
+            const priorityMap: Record<string, number> = { 'Acil': 1, 'Yüksek': 3, 'Orta': 5, 'Düşük': 9 }
+            priority = priorityMap[updates.priority] || 5
+        }
+
+        let status = 'NEED'
+        let percent = '0'
+        if (updates.is_completed !== undefined) {
+            if (updates.is_completed) {
+                status = 'COMP'
+                percent = '100'
+            } else {
+                status = 'IN-PROCESS'
+                percent = '50'
+            }
+        }
+
+        const dueDate = updates.due_date 
+            ? new Date(updates.due_date).toISOString().split('T')[0].replace(/-/g, '')
+            : undefined
+
+        let compAttrs = ''
+        if (updates.title) compAttrs += ` name="${escapeXml(updates.title)}"`
+        if (updates.priority) compAttrs += ` priority="${priority}"`
+        if (updates.is_completed !== undefined) compAttrs += ` status="${status}" percentComplete="${percent}"`
+        
+        let dateXml = ''
+        if (dueDate) {
+            dateXml = `<s d="${dueDate}"/><e d="${dueDate}"/>`
+        }
+
+        let descXml = ''
+        if (updates.notes !== undefined) {
+            descXml = `<desc>${escapeXml(updates.notes)}</desc>`
+        }
+        
+        const soapBody = `<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
+  <soap:Header>
+    <context xmlns="urn:zimbra">
+      <authToken>${token}</authToken>
+      <account by="name">${userEmail}</account>
+    </context>
+  </soap:Header>
+  <soap:Body>
+    <ModifyTaskRequest xmlns="urn:zimbraMail">
+      <m id="${zimbraTaskId}" l="15">
+        <inv>
+          <comp ${compAttrs}>
+            ${dateXml}
+            ${descXml}
+          </comp>
+        </inv>
+        ${updates.title ? `<su>${escapeXml(updates.title)}</su>` : ''}
+        ${updates.notes ? `<mp ct="text/plain"><content>${escapeXml(updates.notes)}</content></mp>` : ''}
+      </m>
+    </ModifyTaskRequest>
+  </soap:Body>
+</soap:Envelope>`
+        
+        return new Promise((resolve) => {
+            const req = https.request({
+                hostname: ZIMBRA_HOST,
+                port: ZIMBRA_ADMIN_PORT,
+                path: '/service/admin/soap',
+                method: 'POST',
+                headers: { 'Content-Type': 'application/soap+xml' },
+                rejectUnauthorized: false
+            }, (res) => {
+                let data = ''
+                res.on('data', c => data += c)
+                res.on('end', () => {
+                   if (res.statusCode === 200 && !data.includes('Fault')) {
+                        resolve({ success: true })
+                    } else {
+                        const fault = data.match(/<soap:Text[^>]*>([^<]+)/)
+                        // console.log('Zimbra Update Fault:', data)
+                        resolve({ success: false, error: fault ? fault[1] : 'Unknown SOAP error' })
+                    }
+                })
+            })
+            req.on('error', (e) => resolve({ success: false, error: e.message }))
+            req.write(soapBody)
+            req.end()
+        })
+    } catch (error) {
+        return { success: false, error: (error as Error).message }
+    }
+}
+
+// Delete task via Admin SOAP API
+export async function deleteZimbraTaskViaAdminAPI(
+    userEmail: string,
+    zimbraTaskId: string
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        const token = await getAdminAuthToken()
+        
+        const soapBody = `<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
+  <soap:Header>
+    <context xmlns="urn:zimbra">
+      <authToken>${token}</authToken>
+      <account by="name">${userEmail}</account>
+    </context>
+  </soap:Header>
+  <soap:Body>
+    <ItemActionRequest xmlns="urn:zimbraMail">
+      <action id="${zimbraTaskId}" op="delete"/>
+    </ItemActionRequest>
+  </soap:Body>
+</soap:Envelope>`
+        
+        return new Promise((resolve) => {
+            const req = https.request({
+                hostname: ZIMBRA_HOST,
+                port: ZIMBRA_ADMIN_PORT,
+                path: '/service/admin/soap',
+                method: 'POST',
+                headers: { 'Content-Type': 'application/soap+xml' },
+                rejectUnauthorized: false
+            }, (res) => {
+                let data = ''
+                res.on('data', c => data += c)
+                res.on('end', () => {
+                   if (res.statusCode === 200 && !data.includes('Fault')) {
+                        resolve({ success: true })
+                    } else {
+                        const fault = data.match(/<soap:Text[^>]*>([^<]+)/)
+                        resolve({ success: false, error: fault ? fault[1] : 'Unknown SOAP error' })
+                    }
+                })
+            })
+            req.on('error', (e) => resolve({ success: false, error: e.message }))
+            req.write(soapBody)
+            req.end()
+        })
+    } catch (error) {
+        return { success: false, error: (error as Error).message }
+    }
+}
+
+// Get task via Admin SOAP API
+export async function getZimbraTaskViaAdminAPI(
+    userEmail: string,
+    zimbraTaskId: string
+): Promise<{ success: boolean; task?: any; error?: string }> {
+    try {
+        const token = await getAdminAuthToken()
+        
+        const soapBody = `<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
+  <soap:Header>
+    <context xmlns="urn:zimbra">
+      <authToken>${token}</authToken>
+      <account by="name">${userEmail}</account>
+    </context>
+  </soap:Header>
+  <soap:Body>
+    <GetMsgRequest xmlns="urn:zimbraMail">
+      <m id="${zimbraTaskId}" />
+    </GetMsgRequest>
+  </soap:Body>
+</soap:Envelope>`
+        
+        return new Promise((resolve) => {
+            const req = https.request({
+                hostname: ZIMBRA_HOST,
+                port: ZIMBRA_ADMIN_PORT,
+                path: '/service/admin/soap',
+                method: 'POST',
+                headers: { 'Content-Type': 'application/soap+xml' },
+                rejectUnauthorized: false
+            }, (res) => {
+                let data = ''
+                res.on('data', c => data += c)
+                res.on('end', () => {
+                   if (res.statusCode === 200 && !data.includes('Fault')) {
+                        // Parse status and percentage
+                        // <comp ... status="COMP" percentComplete="100" ...>
+                        const statusMatch = data.match(/status="([^"]+)"/)
+                        const percentMatch = data.match(/percentComplete="([^"]+)"/)
+                        const subjectMatch = data.match(/<su>([^<]+)<\/su>/)
+                        
+                        resolve({
+                            success: true,
+                            task: {
+                                status: statusMatch ? statusMatch[1] : undefined,
+                                percentComplete: percentMatch ? parseInt(percentMatch[1]) : 0,
+                                title: subjectMatch ? subjectMatch[1] : undefined
+                            }
+                        })
+                    } else {
+                        const fault = data.match(/<soap:Text[^>]*>([^<]+)/)
+                        resolve({ success: false, error: fault ? fault[1] : 'Unknown SOAP error' })
                     }
                 })
             })

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { executeQuery, executeNonQuery } from '@/lib/oracle'
+import { updateZimbraTaskViaAdminAPI, getZimbraTaskViaAdminAPI } from '@/lib/zimbra-sync'
 
 export const runtime = 'nodejs'
 
@@ -63,7 +64,7 @@ export async function GET(
 
         // Assignees (profile nested object olarak)
         const assigneesRaw = await executeQuery(
-            `SELECT ta.task_id, ta.user_id, ta.is_completed, ta.assigned_at,
+            `SELECT ta.task_id, ta.user_id, ta.is_completed, ta.assigned_at, ta.zimbra_task_id,
                     p.id as profile_id, p.email as profile_email, p.full_name as profile_full_name, p.avatar_url as profile_avatar_url, p.department as profile_department
              FROM task_assignees ta
              JOIN profiles p ON ta.user_id = p.id
@@ -96,6 +97,38 @@ export async function GET(
             }
             return result
         })
+
+        // Sync Check: Update status from Zimbra if viewed by assignee
+        const currentUserAssignee = assignees.find((a: any) => a.user_id === session.user.id)
+        if (currentUserAssignee && currentUserAssignee.zimbra_task_id && currentUserAssignee.profile?.email) {
+             try {
+                 const zimbraTask = await getZimbraTaskViaAdminAPI(
+                     currentUserAssignee.profile.email, 
+                     currentUserAssignee.zimbra_task_id
+                 )
+                 
+                 if (zimbraTask.success && zimbraTask.task) {
+                     const isCompletedInZimbra = zimbraTask.task.status === 'COMP' || zimbraTask.task.percentComplete === 100
+                     const isCompletedInDB = currentUserAssignee.is_completed === 1
+
+                     if (isCompletedInZimbra !== isCompletedInDB) {
+                         console.log(`Syncing Zimbra status to DB for ${session.user.id}: Zimbra=${isCompletedInZimbra}, DB=${isCompletedInDB}`)
+                         await executeNonQuery(
+                             `UPDATE task_assignees SET is_completed = :status WHERE task_id = :task_id AND user_id = :user_id`,
+                             { 
+                                 status: isCompletedInZimbra ? 1 : 0,
+                                 task_id: id, 
+                                 user_id: session.user.id 
+                             },
+                             session.user.id
+                         )
+                         currentUserAssignee.is_completed = isCompletedInZimbra ? 1 : 0
+                     }
+                 }
+             } catch (e) {
+                 console.error('Failed to sync Zimbra status on read:', e)
+             }
+        }
 
         // Comments (profile nested object olarak)
         const commentsRaw = await executeQuery(
@@ -215,27 +248,46 @@ export async function PUT(
             console.log(`Priority mapping: ${originalPriority} -> ${priority}`)
         }
 
-        // Strict Permission Check: Only Assignees, Creator, Folder Owner, ADMIN, or SUPERADMIN can edit/close
-        const permissionCheck = await executeQuery(
-            `SELECT 1 as "access" FROM dual 
-             WHERE EXISTS (
-                 SELECT 1 FROM task_assignees WHERE task_id = :1 AND user_id = :2
-             ) OR EXISTS (
-                 SELECT 1 FROM tasks WHERE id = :1 AND created_by = :2
-             ) OR EXISTS (
+        // Permission Check: Allow editing if user is allowed to access the task
+        // We already did an implicit visibility check in GET, but for PUT we should at least check
+        // if the user is somehow related to the task or department.
+        // For simplicity, we allow editing if the user is:
+        // 1. Assignee
+        // 2. Creator
+        // 3. Department Member
+        // 4. Department Owner
+        // 5. Admin
+        
+        // Permission Check for Update
+        const permissionSql = `
+            SELECT 1 as "access" FROM dual 
+            WHERE EXISTS (
+                 SELECT 1 FROM task_assignees WHERE task_id = :task_id AND user_id = :user_id
+            ) OR EXISTS (
+                 SELECT 1 FROM tasks WHERE id = :task_id AND created_by = :user_id
+            ) OR EXISTS (
+                 SELECT 1 FROM tasks t
+                 JOIN lists l ON t.list_id = l.id
+                 JOIN folder_members fm ON l.folder_id = fm.folder_id
+                 WHERE t.id = :task_id AND fm.user_id = :user_id
+            ) OR EXISTS (
                  SELECT 1 FROM tasks t
                  JOIN lists l ON t.list_id = l.id
                  JOIN folders f ON l.folder_id = f.id
-                 WHERE t.id = :1 AND f.user_id = :2
-             ) OR EXISTS (
-                 SELECT 1 FROM profiles WHERE id = :2 AND role IN ('admin', 'superadmin')
-             )`,
-            [resolvedParams.id, session.user.id]
+                 WHERE t.id = :task_id AND f.user_id = :user_id
+            ) OR EXISTS (
+                 SELECT 1 FROM profiles WHERE id = :user_id AND role IN ('admin', 'superadmin')
+            )
+        ` 
+        
+        const permissionCheck = await executeQuery(
+            permissionSql,
+            { task_id: resolvedParams.id, user_id: session.user.id }
         )
 
         if (permissionCheck.length === 0) {
             return NextResponse.json(
-                { error: 'Bu görevi düzenleme veya kapatma yetkiniz yok. Sadece atanan kişiler veya yöneticiler işlem yapabilir.' },
+                { error: 'Bu görevi düzenleme yetkiniz yok.' },
                 { status: 403 }
             )
         }
@@ -290,6 +342,53 @@ export async function PUT(
             session.user.id
         )
 
+        // Sync updates to Zimbra if applicable
+        try {
+            const syncedAssignees = await executeQuery(
+                `SELECT ta.zimbra_task_id, p.email
+                 FROM task_assignees ta
+                 JOIN profiles p ON ta.user_id = p.id
+                 WHERE ta.task_id = :task_id 
+                 AND ta.zimbra_task_id IS NOT NULL 
+                 AND p.zimbra_sync_enabled = 1`,
+                 { task_id: resolvedParams.id },
+                 session.user.id
+            )
+            
+            if (syncedAssignees.length > 0) {
+                 const updatePayload: any = {}
+                 if (title !== undefined) updatePayload.title = title
+                 if (notes !== undefined) updatePayload.notes = notes
+                 if (due_date !== undefined) updatePayload.due_date = due_date
+                 if (priority !== undefined) updatePayload.priority = priority 
+                 if (completed !== undefined) updatePayload.is_completed = completed
+
+                 for (const assignee of syncedAssignees) {
+                     const email = assignee.EMAIL || assignee.email
+                     const zimbraId = assignee.ZIMBRA_TASK_ID || assignee.zimbra_task_id
+                     
+                     if (email && zimbraId) {
+                         const payload = JSON.stringify({
+                             zimbra_task_id: zimbraId,
+                             email: email,
+                             ...updatePayload
+                         })
+                         
+                         // Queue UPDATE
+                         await executeNonQuery(
+                             `INSERT INTO sync_queue (id, task_id, user_email, action_type, payload, status)
+                              VALUES (SYS_GUID(), :tid, :uemail, 'UPDATE', :payload, 'PENDING')`,
+                             { tid: resolvedParams.id, uemail: email, payload },
+                             session.user.id
+                         )
+                         console.log(`✓ Queued update to Zimbra for ${email} (TaskID: ${zimbraId})`)
+                     }
+                 }
+            }
+        } catch (syncErr) {
+            console.error('Zimbra sync update error:', syncErr)
+        }
+
         return NextResponse.json(normalizePriorityFromDB(tasks[0]))
     } catch (error: any) {
         console.error('PUT /api/tasks/[id] error:', error)
@@ -322,16 +421,16 @@ export async function DELETE(
         const permissionCheck = await executeQuery(
             `SELECT 1 as "access" FROM dual 
                  WHERE EXISTS (
-                     SELECT 1 FROM tasks WHERE id = :1 AND created_by = :2
+                     SELECT 1 FROM tasks WHERE id = :task_id AND created_by = :user_id
                  ) OR EXISTS (
                      SELECT 1 FROM tasks t
                      JOIN lists l ON t.list_id = l.id
                      JOIN folders f ON l.folder_id = f.id
-                     WHERE t.id = :1 AND f.user_id = :2
+                     WHERE t.id = :task_id AND f.user_id = :user_id
                  ) OR EXISTS (
-                     SELECT 1 FROM profiles WHERE id = :2 AND role IN ('admin', 'superadmin')
+                     SELECT 1 FROM profiles WHERE id = :user_id AND role IN ('admin', 'superadmin')
                  )`,
-            [resolvedParams.id, session.user.id]
+            { task_id: resolvedParams.id, user_id: session.user.id }
         )
 
         if (permissionCheck.length === 0) {
@@ -339,6 +438,23 @@ export async function DELETE(
                 { error: 'Bu görevi silme yetkiniz yok. Sadece oluşturan, klasör sahibi veya yöneticiler silebilir.' },
                 { status: 403 }
             )
+        }
+
+        // Zimbra Sync: Pre-fetch synced assignees before deletion removes them
+        let syncedAssignees: any[] = []
+        try {
+            syncedAssignees = await executeQuery(
+                `SELECT ta.zimbra_task_id, p.email
+                 FROM task_assignees ta
+                 JOIN profiles p ON ta.user_id = p.id
+                 WHERE ta.task_id = :task_id 
+                 AND ta.zimbra_task_id IS NOT NULL 
+                 AND p.zimbra_sync_enabled = 1`,
+                 { task_id: resolvedParams.id },
+                 session.user.id
+            )
+        } catch (e) {
+            console.error('Error fetching assignees for delete sync:', e)
         }
 
         const result = await executeNonQuery(
@@ -352,6 +468,33 @@ export async function DELETE(
                 { error: 'Task not found or unauthorized' },
                 { status: 404 }
             )
+        }
+
+        // Queue DELETE actions
+        if (syncedAssignees.length > 0) {
+            for (const assignee of syncedAssignees) {
+                const email = assignee.EMAIL || assignee.email
+                const zimbraId = assignee.ZIMBRA_TASK_ID || assignee.zimbra_task_id
+                
+                if (email && zimbraId) {
+                     const payload = JSON.stringify({
+                         zimbra_task_id: zimbraId,
+                         email: email
+                     })
+                     
+                     try {
+                        await executeNonQuery(
+                            `INSERT INTO sync_queue (id, task_id, user_email, action_type, payload, status)
+                             VALUES (SYS_GUID(), :tid, :uemail, 'DELETE', :payload, 'PENDING')`,
+                            { tid: resolvedParams.id, uemail: email, payload },
+                            session.user.id
+                        )
+                     } catch(err) {
+                         console.error(`Failed to queue DELETE for ${email}:`, err)
+                     }
+                }
+            }
+            console.log(`✓ Queued DELETE to Zimbra for ${syncedAssignees.length} assignees.`)
         }
 
         return NextResponse.json({ success: true })

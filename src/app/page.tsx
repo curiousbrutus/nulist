@@ -171,12 +171,9 @@ export default function HomePage() {
                       const membership = folderMembers.find(m => m.folder_id === folder?.id && m.user_id === user.id)
                       const canAddTask = isOwner || membership?.can_add_task
 
-                      if (!canAddTask) return (
-                        <div className="p-4 bg-muted/50 border rounded-xl text-muted-foreground text-sm flex items-center gap-3">
-                          <div className="bg-muted p-2 rounded-lg">🔒</div>
-                          Bu listede görev ekleme yetkiniz bulunmuyor.
-                        </div>
-                      )
+                      // Simply don't show input if no permission (no error message)
+                      if (!canAddTask) return null
+                      
                       return <TaskInput listId={selectedListId} />
                   }
 
@@ -198,12 +195,8 @@ export default function HomePage() {
                       const membership = folderMembers.find(m => m.folder_id === folder?.id && m.user_id === user.id)
                       const canAddTask = isOwner || membership?.can_add_task
 
-                      if (!canAddTask) return (
-                         <div className="p-4 bg-muted/50 border rounded-xl text-muted-foreground text-sm flex items-center gap-3">
-                           <div className="bg-muted p-2 rounded-lg">🔒</div>
-                           Bu departmanda görev ekleme yetkiniz bulunmuyor.
-                         </div>
-                       )
+                      // Simply don't show input if no permission (no error message)
+                      if (!canAddTask) return null
 
                       return <TaskInput listId={firstList.id} placeholder={`${firstList.title} listesine ekle...`} />
                   }

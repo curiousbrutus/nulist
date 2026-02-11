@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
-import { executeNonQuery } from '@/lib/oracle'
+import { executeNonQuery, executeQuery } from '@/lib/oracle'
+import { deleteZimbraTaskViaAdminAPI } from '@/lib/zimbra-sync'
 
 export const runtime = 'nodejs'
 
@@ -27,6 +28,16 @@ export async function DELETE(
             )
         }
 
+        // Get Zimbra info before deletion
+        const zimbraInfo = await executeQuery(
+            `SELECT ta.zimbra_task_id, p.email, p.zimbra_sync_enabled
+             FROM task_assignees ta
+             JOIN profiles p ON ta.user_id = p.id
+             WHERE ta.task_id = :task_id AND ta.user_id = :user_id`,
+             { task_id: taskId, user_id: resolvedParams.id },
+             session.user.id
+        )
+
         // task_assignees tablosunda id kolonu yok, composite key kullanıyor (task_id + user_id)
         const result = await executeNonQuery(
             `DELETE FROM task_assignees WHERE task_id = :task_id AND user_id = :user_id`,
@@ -39,6 +50,21 @@ export async function DELETE(
                 { error: 'Assignment not found or unauthorized' },
                 { status: 404 }
             )
+        }
+
+        // Remove from Zimbra if synced
+        if (zimbraInfo.length > 0) {
+            const info = zimbraInfo[0]
+            if (info.ZIMBRA_TASK_ID || info.zimbra_task_id) {
+                const zimbraId = info.ZIMBRA_TASK_ID || info.zimbra_task_id
+                const email = info.EMAIL || info.email
+                if (zimbraId && email) {
+                    // Fire and forget
+                    deleteZimbraTaskViaAdminAPI(email, zimbraId).catch(err => 
+                        console.error('Failed to delete Zimbra task:', err)
+                    )
+                }
+            }
         }
 
         return NextResponse.json({ success: true })
