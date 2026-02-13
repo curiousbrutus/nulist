@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { useToast } from '@/components/ui/toast'
 import { ArrowLeft, Save } from 'lucide-react'
 import { InitialsAvatar } from '@/components/ui/InitialsAvatar'
+import { QRCodeSVG } from 'qrcode.react'
 
 export default function ProfilePage() {
     const { user, profile, setProfile } = useAuthStore()
@@ -239,7 +240,20 @@ export default function ProfilePage() {
                     </div>
 
                     {!profile?.telegram_user_id && (
-                        <div className="pt-2">
+                        <div className="pt-2 space-y-4">
+                            <div className="flex flex-col items-center gap-3">
+                                <div className="bg-white p-3 rounded-xl border">
+                                    <QRCodeSVG
+                                        value="https://t.me/clawdbot5449bot"
+                                        size={160}
+                                        level="M"
+                                        includeMargin={false}
+                                    />
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                    Telefonunuzla QR kodu tarayarak botu açabilirsiniz
+                                </p>
+                            </div>
                             <Button
                                 variant="outline"
                                 className="w-full py-6 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-50"
@@ -247,7 +261,7 @@ export default function ProfilePage() {
                             >
                                 @clawdbot5449bot ile Bağlan
                             </Button>
-                            <p className="text-[10px] text-center text-muted-foreground mt-3 leading-relaxed">
+                            <p className="text-[10px] text-center text-muted-foreground leading-relaxed">
                                 Botu başlatıp <strong>/start</strong> komutu ile emailinizi onaylayarak<br />
                                 bildirimleri almaya başlayabilirsiniz.
                             </p>

@@ -25,6 +25,7 @@ export interface Folder {
     parent_id?: string; // Parent folder ID for hierarchy
     display_order?: number; // Display order in sidebar (lower = higher priority)
     is_pinned?: boolean; // Whether folder is pinned to top of sidebar
+    branch?: string; // Hospital branch for secretary filtering
     created_at?: string;
 }
 

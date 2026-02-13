@@ -24,16 +24,37 @@ export async function PUT(
         }
 
         const body = await request.json()
-        const { role } = body
+        const { role, full_name, email } = body
 
-        if (!['user', 'admin', 'secretary', 'superadmin'].includes(role)) {
-            return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
+        const updates: string[] = []
+        const queryParams: Record<string, any> = { id }
+
+        if (role) {
+            if (!['user', 'admin', 'secretary', 'superadmin'].includes(role)) {
+                return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
+            }
+            updates.push('role = :role')
+            queryParams.role = role
         }
 
-        // Update user role
+        if (full_name !== undefined) {
+            updates.push('full_name = :full_name')
+            queryParams.full_name = full_name
+        }
+
+        if (email !== undefined) {
+            updates.push('email = :email')
+            queryParams.email = email.toLowerCase()
+        }
+
+        if (updates.length === 0) {
+            return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
+        }
+
+        // Update user
         const result = await executeNonQuery(
-            `UPDATE profiles SET role = :role WHERE id = :id`,
-            { role, id }
+            `UPDATE profiles SET ${updates.join(', ')} WHERE id = :id`,
+            queryParams
         )
 
         return NextResponse.json({ success: true, updated: result })

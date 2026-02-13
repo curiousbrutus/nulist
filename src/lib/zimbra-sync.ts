@@ -19,6 +19,9 @@ function getAdminPassword(): string {
 let adminAuthToken: string | null = null
 let tokenExpiry: number = 0
 
+// Cache for delegated user tokens
+const delegateTokenCache = new Map<string, { token: string; expiry: number }>()
+
 export interface ZimbraTask {
     id: string
     uid: string
@@ -86,8 +89,14 @@ async function getAdminAuthToken(): Promise<string> {
     })
 }
 
-// Get delegate auth token for a specific user
+// Get delegate auth token for a specific user (cached)
 async function getDelegateAuthToken(userEmail: string): Promise<string> {
+    // Check cache
+    const cached = delegateTokenCache.get(userEmail)
+    if (cached && Date.now() < cached.expiry) {
+        return cached.token
+    }
+
     try {
         const adminToken = await getAdminAuthToken()
         
@@ -119,6 +128,10 @@ async function getDelegateAuthToken(userEmail: string): Promise<string> {
                 res.on('end', () => {
                     const match = data.match(/<authToken[^>]*>([^<]+)<\/authToken>/)
                     if (match) {
+                        delegateTokenCache.set(userEmail, {
+                            token: match[1],
+                            expiry: Date.now() + 3600000 // 1 hour
+                        })
                         resolve(match[1])
                     } else {
                         reject(new Error('Delegate auth failed'))
@@ -156,9 +169,8 @@ export async function getZimbraTasksJSON(userEmail: string): Promise<any[]> {
                     if (res.statusCode === 200) {
                         try {
                             const json = JSON.parse(data)
-                            // Structure is usually { tasks: [ ... ] } or simple array depending on Zimbra version
-                            // Zimbra JSON often wraps: { "tasks": [ ... ] }
-                            const result = json.tasks || json || []
+                            // Zimbra REST API returns { "task": [ ... ] } (singular key)
+                            const result = json.task || json.tasks || json || []
                             resolve(Array.isArray(result) ? result : [])
                         } catch (e) {
                             console.error('JSON Parse error for user ' + userEmail, e)
@@ -183,6 +195,25 @@ export async function getZimbraTasksJSON(userEmail: string): Promise<any[]> {
     }
 }
 
+// NeoList status <-> Zimbra SOAP status mapping
+export const STATUS_TO_ZIMBRA: Record<string, string> = {
+    'pending': 'NEED',
+    'in_progress': 'INPR',
+    'completed': 'COMP',
+    'cancelled': 'CANCELLED',
+    'waiting': 'WAITING',
+    'deferred': 'DEFERRED'
+}
+
+export const ZIMBRA_TO_STATUS: Record<string, string> = {
+    'NEED': 'pending',
+    'INPR': 'in_progress',
+    'COMP': 'completed',
+    'CANCELLED': 'cancelled',
+    'WAITING': 'waiting',
+    'DEFERRED': 'deferred'
+}
+
 // Create task via Admin SOAP API (no sharing required)
 export async function createZimbraTaskViaAdminAPI(
     userEmail: string,
@@ -191,18 +222,27 @@ export async function createZimbraTaskViaAdminAPI(
         notes?: string
         due_date?: string | Date
         priority?: string
+        status?: string
+        is_completed?: boolean
     }
 ): Promise<ZimbraCreateResult> {
     try {
         const token = await getAdminAuthToken()
-        
-        const dueDate = task.due_date 
+
+        const dueDate = task.due_date
             ? new Date(task.due_date).toISOString().split('T')[0].replace(/-/g, '')
             : new Date(Date.now() + 7*24*60*60*1000).toISOString().split('T')[0].replace(/-/g, '')
-        
+
         const priorityMap: Record<string, number> = { 'Acil': 1, 'Yüksek': 3, 'Orta': 5, 'Düşük': 9 }
         const priority = priorityMap[task.priority || 'Orta'] || 5
-        
+
+        let taskStatus = STATUS_TO_ZIMBRA[task.status || 'pending'] || 'NEED'
+        let percentComplete = '0'
+        if (task.is_completed || task.status === 'completed') {
+            taskStatus = 'COMP'
+            percentComplete = '100'
+        }
+
         const soapBody = `<?xml version="1.0"?>
 <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
   <soap:Header>
@@ -215,7 +255,7 @@ export async function createZimbraTaskViaAdminAPI(
     <CreateTaskRequest xmlns="urn:zimbraMail">
       <m l="15">
         <inv>
-          <comp name="${escapeXml(task.title)}" status="NEED" priority="${priority}" percentComplete="0">
+          <comp name="${escapeXml(task.title)}" status="${taskStatus}" priority="${priority}" percentComplete="${percentComplete}">
             <s d="${dueDate}"/>
             <e d="${dueDate}"/>
             <or a="${getAdminEmail()}" d="İş Takip"/>
@@ -244,7 +284,7 @@ export async function createZimbraTaskViaAdminAPI(
                 res.on('data', c => data += c)
                 res.on('end', () => {
                     if (res.statusCode === 200 && !data.includes('Fault')) {
-                        const idMatch = data.match(/calItemId="(\d+)"/)
+                        const idMatch = data.match(/calItemId="([^"]+)"/)
                         const invIdMatch = data.match(/invId="([^"]+)"/)
                         resolve({
                             success: true,
@@ -269,6 +309,227 @@ export async function createZimbraTaskViaAdminAPI(
     }
 }
 
+// NeoList status → CalDAV VTODO STATUS mapping
+const STATUS_TO_CALDAV: Record<string, string> = {
+    'pending': 'NEEDS-ACTION',
+    'in_progress': 'IN-PROCESS',
+    'completed': 'COMPLETED',
+    'cancelled': 'CANCELLED',
+    'waiting': 'NEEDS-ACTION',
+    'deferred': 'NEEDS-ACTION'
+}
+
+// CalDAV HTTP request helper
+function caldavHttpRequest(
+    method: string,
+    path: string,
+    userToken: string,
+    body?: string,
+    extraHeaders?: Record<string, string>
+): Promise<{ status: number; headers: Record<string, any>; body: string }> {
+    return new Promise((resolve) => {
+        const req = https.request({
+            hostname: ZIMBRA_HOST,
+            port: ZIMBRA_CALDAV_PORT,
+            path,
+            method,
+            headers: {
+                'Cookie': `ZM_AUTH_TOKEN=${userToken}`,
+                ...(body ? { 'Content-Type': 'text/calendar; charset=utf-8' } : {}),
+                ...extraHeaders
+            },
+            rejectUnauthorized: false,
+            timeout: 15000
+        }, (res) => {
+            let data = ''
+            res.on('data', c => data += c)
+            res.on('end', () => resolve({ status: res.statusCode || 0, headers: res.headers, body: data }))
+        })
+        req.on('error', (e) => resolve({ status: 0, headers: {}, body: 'ERROR: ' + e.message }))
+        req.on('timeout', () => { req.destroy(); resolve({ status: 0, headers: {}, body: 'TIMEOUT' }) })
+        if (body) req.write(body)
+        req.end()
+    })
+}
+
+// Get task UID and details via SOAP GetTaskRequest
+async function getZimbraTaskDetailsByCalItemId(
+    adminToken: string,
+    userEmail: string,
+    calItemId: string
+): Promise<{ uid?: string; name?: string; status?: string; priority?: string; percentComplete?: string; startDate?: string; endDate?: string; description?: string; sequence?: string } | null> {
+    return new Promise((resolve) => {
+        const soapBody = `<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
+  <soap:Header>
+    <context xmlns="urn:zimbra">
+      <authToken>${adminToken}</authToken>
+      <account by="name">${userEmail}</account>
+    </context>
+  </soap:Header>
+  <soap:Body>
+    <GetTaskRequest xmlns="urn:zimbraMail" id="${calItemId}"/>
+  </soap:Body>
+</soap:Envelope>`
+
+        const req = https.request({
+            hostname: ZIMBRA_HOST,
+            port: ZIMBRA_ADMIN_PORT,
+            path: '/service/admin/soap',
+            method: 'POST',
+            headers: { 'Content-Type': 'application/soap+xml' },
+            rejectUnauthorized: false
+        }, (res) => {
+            let data = ''
+            res.on('data', c => data += c)
+            res.on('end', () => {
+                if (res.statusCode === 200 && !data.includes('Fault')) {
+                    const uid = data.match(/uid="([^"]+)"/)?.[1]
+                    const name = data.match(/name="([^"]+)"/)?.[1]
+                    const status = data.match(/status="([^"]+)"/)?.[1]
+                    const priority = data.match(/priority="([^"]+)"/)?.[1]
+                    const percentComplete = data.match(/percentComplete="([^"]+)"/)?.[1]
+                    const seq = data.match(/seq="([^"]+)"/)?.[1]
+                    const startDate = data.match(/<s d="([^"]+)"/)?.[1]
+                    const endDate = data.match(/<e d="([^"]+)"/)?.[1]
+                    const desc = data.match(/<desc>([^<]*)<\/desc>/)?.[1]
+                    resolve({ uid, name, status, priority, percentComplete, startDate: startDate, endDate, description: desc, sequence: seq })
+                } else {
+                    resolve(null)
+                }
+            })
+        })
+        req.on('error', () => resolve(null))
+        req.write(soapBody)
+        req.end()
+    })
+}
+
+// Parse VTODO properties from iCalendar text
+function parseVtodoProperties(vtodoText: string): Record<string, string> {
+    const props: Record<string, string> = {}
+    const lines = vtodoText.replace(/\r\n /g, '').split(/\r?\n/)
+    for (const line of lines) {
+        const match = line.match(/^([A-Z-]+)[;:](.*)$/)
+        if (match) {
+            // Strip parameters for property name (e.g., DTSTART;VALUE=DATE → DTSTART)
+            const propName = match[1].split(';')[0]
+            props[propName] = match[2]
+        }
+    }
+    return props
+}
+
+// Update task via CalDAV PUT (preserves calItemId - no stale IDs)
+async function updateTaskViaCalDAV(
+    userEmail: string,
+    zimbraTaskId: string,
+    updates: {
+        title?: string
+        notes?: string
+        due_date?: string | Date
+        priority?: string
+        status?: string
+        is_completed?: boolean
+    }
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        // 1. Get delegated user token for CalDAV
+        const userToken = await getDelegateAuthToken(userEmail)
+
+        // 2. Resolve VTODO UID - try direct CalDAV GET first (works if zimbraTaskId is already a UID)
+        let uid = zimbraTaskId
+        let getResult = await caldavHttpRequest('GET', `/dav/${userEmail}/Tasks/${uid}.ics`, userToken)
+
+        if (getResult.status !== 200 && zimbraTaskId.includes(':')) {
+            // If failed and ID has colon (calItemId format), look up UID via SOAP
+            const adminToken = await getAdminAuthToken()
+            const taskDetails = await getZimbraTaskDetailsByCalItemId(adminToken, userEmail, zimbraTaskId)
+            if (!taskDetails?.uid) {
+                return { success: false, error: 'Could not resolve task UID' }
+            }
+            uid = taskDetails.uid
+            getResult = await caldavHttpRequest('GET', `/dav/${userEmail}/Tasks/${uid}.ics`, userToken)
+        }
+
+        if (getResult.status !== 200) {
+            return { success: false, error: `CalDAV GET failed: ${getResult.status}` }
+        }
+        const etag = getResult.headers['etag']
+        if (!etag) {
+            return { success: false, error: 'No ETag in CalDAV response' }
+        }
+
+        // 3. Parse existing VTODO to get current values
+        const existingProps = parseVtodoProperties(getResult.body)
+        const existingTitle = existingProps['SUMMARY'] || 'Untitled Task'
+        const existingPriority = existingProps['PRIORITY'] || '5'
+        const existingStatus = existingProps['STATUS'] || 'NEEDS-ACTION'
+        const existingPercent = existingProps['PERCENT-COMPLETE'] || '0'
+        const existingSeq = existingProps['SEQUENCE'] || '0'
+        // Extract date from VALUE=DATE:YYYYMMDD format
+        const existingDue = existingProps['DUE']?.replace(/^VALUE=DATE:/, '') || existingProps['DTSTART']?.replace(/^VALUE=DATE:/, '') || ''
+        // Description might contain escaped chars
+        const existingDesc = existingProps['DESCRIPTION']?.replace(/\\n/g, '\n').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\') || ''
+
+        // 4. Merge updates with existing data
+        const priorityMap: Record<string, number> = { 'Acil': 1, 'Yüksek': 3, 'Orta': 5, 'Düşük': 9 }
+        const reversePriorityMap: Record<string, string> = { '1': 'Acil', '3': 'Yüksek', '5': 'Orta', '9': 'Düşük' }
+
+        const finalTitle = updates.title || existingTitle
+        const finalPriority = updates.priority ? (priorityMap[updates.priority] || 5) : parseInt(existingPriority)
+        const finalDescription = updates.notes !== undefined ? updates.notes : existingDesc
+
+        // Status: updates take precedence
+        let caldavStatus = existingStatus
+        let percentComplete = existingPercent
+        if (updates.is_completed || updates.status === 'completed') {
+            caldavStatus = 'COMPLETED'
+            percentComplete = '100'
+        } else if (updates.status) {
+            caldavStatus = STATUS_TO_CALDAV[updates.status] || 'NEEDS-ACTION'
+            percentComplete = updates.status === 'in_progress' ? '50' : '0'
+        }
+
+        // Due date
+        let dueDate = existingDue
+        if (updates.due_date) {
+            dueDate = new Date(updates.due_date).toISOString().split('T')[0].replace(/-/g, '')
+        }
+
+        const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
+        const seq = parseInt(existingSeq) + 1
+
+        const escapeIcal = (text: string) => text.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n')
+
+        // 5. Build VTODO
+        let vtodo = `BEGIN:VCALENDAR\r\nPRODID:Zimbra-Calendar-Provider\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:${uid}\r\nSUMMARY:${escapeIcal(finalTitle)}\r\nPRIORITY:${finalPriority}\r\nPERCENT-COMPLETE:${percentComplete}\r\nORGANIZER;CN="İş Takip":mailto:${getAdminEmail()}\r\n`
+        if (dueDate) {
+            vtodo += `DTSTART;VALUE=DATE:${dueDate}\r\nDUE;VALUE=DATE:${dueDate}\r\n`
+        }
+        if (finalDescription) {
+            vtodo += `DESCRIPTION:${escapeIcal(finalDescription)}\r\n`
+        }
+        vtodo += `STATUS:${caldavStatus}\r\nCLASS:PUBLIC\r\nLAST-MODIFIED:${now}\r\nDTSTAMP:${now}\r\nSEQUENCE:${seq}\r\nEND:VTODO\r\nEND:VCALENDAR`
+
+        // 6. PUT modified VTODO
+        const putResult = await caldavHttpRequest(
+            'PUT',
+            `/dav/${userEmail}/Tasks/${uid}.ics`,
+            userToken,
+            vtodo,
+            { 'If-Match': etag }
+        )
+
+        if (putResult.status === 204 || putResult.status === 200) {
+            return { success: true }
+        }
+        return { success: false, error: `CalDAV PUT failed: ${putResult.status} ${putResult.body.substring(0, 200)}` }
+    } catch (error) {
+        return { success: false, error: `CalDAV error: ${(error as Error).message}` }
+    }
+}
+
 // Update task via Admin SOAP API
 export async function updateZimbraTaskViaAdminAPI(
     userEmail: string,
@@ -278,98 +539,37 @@ export async function updateZimbraTaskViaAdminAPI(
         notes?: string
         due_date?: string | Date
         priority?: string
+        status?: string
         is_completed?: boolean
     }
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; newTaskId?: string }> {
     try {
-        const token = await getAdminAuthToken()
-        
-        let priority = 5
-        if (updates.priority) {
-            const priorityMap: Record<string, number> = { 'Acil': 1, 'Yüksek': 3, 'Orta': 5, 'Düşük': 9 }
-            priority = priorityMap[updates.priority] || 5
+        // Try CalDAV update first (preserves calItemId - no stale IDs in webmail)
+        const caldavResult = await updateTaskViaCalDAV(userEmail, zimbraTaskId, updates)
+        if (caldavResult.success) {
+            return { success: true } // No newTaskId because calItemId is preserved
         }
 
-        let status = 'NEED'
-        let percent = '0'
-        if (updates.is_completed !== undefined) {
-            if (updates.is_completed) {
-                status = 'COMP'
-                percent = '100'
-            } else {
-                status = 'IN-PROCESS'
-                percent = '50'
-            }
-        }
+        console.log(`CalDAV update failed for ${zimbraTaskId}, falling back to delete+recreate: ${caldavResult.error}`)
 
-        const dueDate = updates.due_date 
-            ? new Date(updates.due_date).toISOString().split('T')[0].replace(/-/g, '')
-            : undefined
+        // Fallback: delete old task, create new one
+        await deleteZimbraTaskViaAdminAPI(userEmail, zimbraTaskId)
 
-        let compAttrs = ''
-        if (updates.title) compAttrs += ` name="${escapeXml(updates.title)}"`
-        if (updates.priority) compAttrs += ` priority="${priority}"`
-        if (updates.is_completed !== undefined) compAttrs += ` status="${status}" percentComplete="${percent}"`
-        
-        let dateXml = ''
-        if (dueDate) {
-            dateXml = `<s d="${dueDate}"/><e d="${dueDate}"/>`
-        }
-
-        let descXml = ''
-        if (updates.notes !== undefined) {
-            descXml = `<desc>${escapeXml(updates.notes)}</desc>`
-        }
-        
-        const soapBody = `<?xml version="1.0"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-  <soap:Header>
-    <context xmlns="urn:zimbra">
-      <authToken>${token}</authToken>
-      <account by="name">${userEmail}</account>
-    </context>
-  </soap:Header>
-  <soap:Body>
-    <ModifyTaskRequest xmlns="urn:zimbraMail">
-      <m id="${zimbraTaskId}" l="15">
-        <inv>
-          <comp ${compAttrs}>
-            ${dateXml}
-            ${descXml}
-          </comp>
-        </inv>
-        ${updates.title ? `<su>${escapeXml(updates.title)}</su>` : ''}
-        ${updates.notes ? `<mp ct="text/plain"><content>${escapeXml(updates.notes)}</content></mp>` : ''}
-      </m>
-    </ModifyTaskRequest>
-  </soap:Body>
-</soap:Envelope>`
-        
-        return new Promise((resolve) => {
-            const req = https.request({
-                hostname: ZIMBRA_HOST,
-                port: ZIMBRA_ADMIN_PORT,
-                path: '/service/admin/soap',
-                method: 'POST',
-                headers: { 'Content-Type': 'application/soap+xml' },
-                rejectUnauthorized: false
-            }, (res) => {
-                let data = ''
-                res.on('data', c => data += c)
-                res.on('end', () => {
-                   if (res.statusCode === 200 && !data.includes('Fault')) {
-                        resolve({ success: true })
-                    } else {
-                        const fault = data.match(/<soap:Text[^>]*>([^<]+)/)
-                        // console.log('Zimbra Update Fault:', data)
-                        resolve({ success: false, error: fault ? fault[1] : 'Unknown SOAP error' })
-                    }
-                })
-            })
-            req.on('error', (e) => resolve({ success: false, error: e.message }))
-            req.write(soapBody)
-            req.end()
+        const createResult = await createZimbraTaskViaAdminAPI(userEmail, {
+            title: updates.title || 'Untitled Task',
+            notes: updates.notes,
+            due_date: updates.due_date,
+            priority: updates.priority,
+            status: updates.status,
+            is_completed: updates.is_completed
         })
+
+        if (createResult.success) {
+            const newId = createResult.taskId || createResult.uid
+            return { success: true, newTaskId: newId }
+        } else {
+            return { success: false, error: createResult.error }
+        }
     } catch (error) {
         return { success: false, error: (error as Error).message }
     }
@@ -666,6 +866,10 @@ export function taskToVTODO(task: {
         status = 'IN-PROCESS'
     } else if (task.status === 'cancelled') {
         status = 'CANCELLED'
+    } else if (task.status === 'waiting') {
+        status = 'WAITING'
+    } else if (task.status === 'deferred') {
+        status = 'DEFERRED'
     }
     
     // Priority mapping: Acil=1, Yüksek=3, Orta=5, Düşük=9
@@ -773,6 +977,7 @@ export function vtodoToTask(vtodoString: string): ZimbraTask | null {
 }
 
 // Create a task in user's Zimbra Tasks folder
+// Uses Admin SOAP API directly (no CalDAV sharing required)
 export async function createZimbraTask(
     userEmail: string,
     task: {
@@ -785,63 +990,20 @@ export async function createZimbraTask(
         is_completed?: number
     }
 ): Promise<ZimbraCreateResult> {
-    try {
-        const taskUid = task.id || crypto.randomUUID()
-        const taskPath = `/dav/${userEmail}/Tasks/${taskUid}.ics`
-        
-        const vtodo = taskToVTODO({
-            ...task,
-            id: taskUid
-        }, getAdminEmail())
-        
-        const result = await makeCalDAVRequest(
-            taskPath,
-            'PUT',
-            vtodo,
-            { 'Content-Type': 'text/calendar; charset=utf-8' }
-        )
-        
-        if (result.statusCode === 201 || result.statusCode === 204) {
-            return {
-                success: true,
-                uid: taskUid,
-                etag: result.headers.etag
-            }
-        } else if (result.statusCode === 404 || result.statusCode === 403) {
-            // CalDAV erişimi yok, Admin SOAP API ile dene
-            console.log(`CalDAV erişimi yok (${result.statusCode}), Admin API ile deneniyor...`)
-            return createZimbraTaskViaAdminAPI(userEmail, task)
-        } else if (result.statusCode === 401) {
-            return {
-                success: false,
-                error: 'Yetkilendirme hatası. Admin credentials kontrol edin.'
-            }
-        } else {
-            return {
-                success: false,
-                error: `Zimbra hatası: ${result.statusCode}`
-            }
-        }
-    } catch (error) {
-        // CalDAV hatası durumunda Admin API ile dene
-        console.log(`CalDAV hatası: ${(error as Error).message}, Admin API ile deneniyor...`)
-        try {
-            return await createZimbraTaskViaAdminAPI(userEmail, task)
-        } catch (adminError) {
-            return {
-                success: false,
-                error: `CalDAV ve Admin API başarısız: ${(adminError as Error).message}`
-            }
-        }
-    }
+    // Go directly to Admin SOAP API - no CalDAV sharing needed
+    return createZimbraTaskViaAdminAPI(userEmail, {
+        ...task,
+        is_completed: task.is_completed !== undefined ? Boolean(task.is_completed) : undefined
+    })
 }
 
 // Update a task in user's Zimbra Tasks folder
+// Uses Admin SOAP API directly with the calItemId
 export async function updateZimbraTask(
     userEmail: string,
-    taskUid: string,
+    zimbraTaskId: string,
     task: {
-        title: string
+        title?: string
         notes?: string
         due_date?: string | Date
         priority?: string
@@ -849,28 +1011,23 @@ export async function updateZimbraTask(
         is_completed?: number
     }
 ): Promise<ZimbraCreateResult> {
-    return createZimbraTask(userEmail, { ...task, id: taskUid })
+    const result = await updateZimbraTaskViaAdminAPI(userEmail, zimbraTaskId, {
+        title: task.title,
+        notes: task.notes,
+        due_date: task.due_date,
+        priority: task.priority,
+        is_completed: task.is_completed !== undefined ? Boolean(task.is_completed) : undefined
+    })
+    return { success: result.success, error: result.error }
 }
 
 // Delete a task from user's Zimbra Tasks folder
+// Uses Admin SOAP API directly
 export async function deleteZimbraTask(
     userEmail: string,
-    taskUid: string
+    zimbraTaskId: string
 ): Promise<{ success: boolean; error?: string }> {
-    try {
-        const taskPath = `/dav/${userEmail}/Tasks/${taskUid}.ics`
-        const result = await makeCalDAVRequest(taskPath, 'DELETE')
-        
-        if (result.statusCode === 204 || result.statusCode === 200) {
-            return { success: true }
-        } else if (result.statusCode === 404) {
-            return { success: true } // Already deleted
-        } else {
-            return { success: false, error: `Delete failed: ${result.statusCode}` }
-        }
-    } catch (error) {
-        return { success: false, error: (error as Error).message }
-    }
+    return deleteZimbraTaskViaAdminAPI(userEmail, zimbraTaskId)
 }
 
 // Get all tasks from user's Zimbra Tasks folder
@@ -928,18 +1085,6 @@ export async function syncTasksToZimbra(userEmail: string, userId: string): Prom
     errors?: string[]
 }> {
     try {
-        // Check if user has shared Tasks folder
-        const hasAccess = await checkZimbraAccess(userEmail)
-        if (!hasAccess) {
-            return {
-                success: false,
-                synced: 0,
-                failed: 0,
-                total: 0,
-                errors: [`${userEmail} Tasks klasörünü admin ile paylaşmamış.`]
-            }
-        }
-        
         // Get user's active tasks
         const tasks = await executeQuery(
             `SELECT t.id, t.title, t.notes, t.due_date, t.is_completed, t.status, 
@@ -1037,17 +1182,10 @@ export async function syncSingleTaskToZimbra(
     },
     action: 'create' | 'update' | 'delete' = 'create'
 ): Promise<ZimbraCreateResult> {
-    // Check if user has Zimbra sync enabled
-    const hasAccess = await checkZimbraAccess(userEmail)
-    if (!hasAccess) {
-        console.log(`Zimbra sync skipped for ${userEmail} - no access`)
-        return { success: true } // Don't fail the main operation
-    }
-    
     if (action === 'delete') {
         const result = await deleteZimbraTask(userEmail, taskId)
         return { success: result.success, error: result.error }
     }
-    
+
     return createZimbraTask(userEmail, { ...task, id: taskId })
 }

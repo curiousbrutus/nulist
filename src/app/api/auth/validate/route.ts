@@ -66,8 +66,8 @@ export async function POST(request: NextRequest) {
                             .join(' ')
 
                         await executeNonQuery(
-                            `INSERT INTO profiles (id, email, full_name, password_hash, role) 
-                             VALUES (:id, :email, :full_name, :password_hash, 'user')`,
+                            `INSERT INTO profiles (id, email, full_name, password_hash, role, zimbra_sync_enabled)
+                             VALUES (:id, :email, :full_name, :password_hash, 'user', 1)`,
                             {
                                 id: newId,
                                 email: email.toLowerCase(),
