@@ -62,3 +62,13 @@ _trash/
 # OS
 .DS_Store
 Thumbs.db
+nul
+
+# Claude temp files
+tmpclaude-*
+
+# Debug scripts
+scripts/debug/
+
+# Misc binaries
+*.exe
