@@ -33,6 +33,24 @@ function normalizePriorityFromDB(priority: any): string {
     return PRIORITY_FROM_DB[priority] || 'medium'
 }
 
+function normalizeRecurrenceMode(mode: any): 'fixed_schedule' | 'completion_driven' | null {
+    if (mode === 'fixed_schedule' || mode === 'completion_driven') {
+        return mode
+    }
+    return null
+}
+
+function normalizeRecurrenceEnabled(enabled: any): number {
+    return enabled ? 1 : 0
+}
+
+function normalizeRecurrenceIntervalDays(interval: any): number | null {
+    if (interval === undefined || interval === null || interval === '') return null
+    const parsed = Number(interval)
+    if (!Number.isFinite(parsed) || parsed < 1) return null
+    return Math.floor(parsed)
+}
+
 // GET /api/tasks - Tasks listele (sadece kullanıcının görebildiği görevler)
 export async function GET(request: NextRequest) {
     try {
@@ -97,7 +115,18 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json()
-        const { title, list_id, description, due_date, priority, status } = body
+        const {
+            title,
+            list_id,
+            description,
+            due_date,
+            priority,
+            status,
+            recurrence_enabled,
+            recurrence_mode,
+            recurrence_interval_days,
+            recurrence_parent_task_id
+        } = body
 
         if (!title || typeof title !== 'string') {
             return NextResponse.json(
@@ -127,11 +156,35 @@ export async function POST(request: NextRequest) {
             priority: normalizePriorityForDB(priority),
             created_by: session.user.id,
             due_date: dueDateValue,
-            is_completed: 0
+            is_completed: 0,
+            recurrence_enabled: normalizeRecurrenceEnabled(recurrence_enabled),
+            recurrence_mode: normalizeRecurrenceMode(recurrence_mode),
+            recurrence_interval_days: normalizeRecurrenceIntervalDays(recurrence_interval_days),
+            recurrence_parent_task_id: recurrence_parent_task_id || null
         }
 
-        const sql = `INSERT INTO tasks (id, list_id, title, notes, due_date, priority, created_by, is_completed)
-               VALUES (:id, :list_id, :title, :notes, :due_date, :priority, :created_by, :is_completed)`
+        if (params.recurrence_enabled === 1 && !params.recurrence_mode) {
+            return NextResponse.json(
+                { error: 'recurrence_mode is required when recurrence_enabled is true' },
+                { status: 400 }
+            )
+        }
+
+        if (params.recurrence_enabled === 1 && !params.recurrence_interval_days) {
+            return NextResponse.json(
+                { error: 'recurrence_interval_days is required when recurrence_enabled is true' },
+                { status: 400 }
+            )
+        }
+
+        const sql = `INSERT INTO tasks (
+                    id, list_id, title, notes, due_date, priority, created_by, is_completed,
+                    recurrence_enabled, recurrence_mode, recurrence_interval_days, recurrence_parent_task_id
+                )
+               VALUES (
+                    :id, :list_id, :title, :notes, :due_date, :priority, :created_by, :is_completed,
+                    :recurrence_enabled, :recurrence_mode, :recurrence_interval_days, :recurrence_parent_task_id
+                )`
 
         await executeNonQuery(sql, params, session.user.id)
 

@@ -72,3 +72,23 @@ scripts/debug/
 
 # Misc binaries
 *.exe
+
+# SSL Certificates & Private Keys - NEVER commit these
+crt/
+ssl/
+*.crt
+*.key
+*.pfx
+*.p7b
+*.ca-bundle
+_.*/
+
+# Windows-specific server setup scripts (not needed in repo)
+ecosystem.ssl.config.js
+scripts/start-https.js
+scripts/network/
+start-https.bat
+
+# Temp / one-off scripts
+tmp_db_check.ts
+docs/WINDOWS_SSL_PFX.md

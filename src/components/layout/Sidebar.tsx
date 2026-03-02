@@ -53,6 +53,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         description: string;
         onConfirm: () => void;
     }>({ isOpen: false, title: '', description: '', onConfirm: () => { } })
+    const canDeleteDepartment = profile?.role === 'admin' || profile?.role === 'superadmin'
 
     // Handle sidebar resize
     useEffect(() => {
@@ -175,7 +176,12 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             body: JSON.stringify({ title: editText })
         })
         if (!res.ok) {
-            showToast('Güncellenemedi', 'error')
+            let message = 'Güncellenemedi'
+            try {
+                const data = await res.json()
+                if (data?.error) message = data.error
+            } catch {}
+            showToast(message, 'error')
         } else {
             fetchInitialData()
             setEditingFolderId(null)
@@ -187,16 +193,25 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             setEditingListId(null)
             return
         }
+
         const res = await fetch(`/api/lists/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: editText })
+            body: JSON.stringify({ title: editText.trim() })
         })
+
         if (!res.ok) {
-            showToast('Güncellenemedi', 'error')
+            let message = 'Güncellenemedi'
+            try {
+                const data = await res.json()
+                if (data?.error) message = data.error
+            } catch {}
+            showToast(message, 'error')
         } else {
             fetchInitialData()
+            showToast('Liste güncellendi', 'success')
             setEditingListId(null)
+            setEditText('')
         }
     }
 
@@ -388,16 +403,18 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                                             >
                                                 <Plus className="h-3.5 w-3.5" />
                                             </button>
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleDeleteFolder(folder.id);
-                                                }}
-                                                className="p-1 hover:bg-white/20 rounded text-white/70 hover:text-red-400 ml-1"
-                                                title="Departmanı Sil"
-                                            >
-                                                <Trash2 className="h-3.5 w-3.5" />
-                                            </button>
+                                            {canDeleteDepartment && (
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleDeleteFolder(folder.id);
+                                                    }}
+                                                    className="p-1 hover:bg-white/20 rounded text-white/70 hover:text-red-400 ml-1"
+                                                    title="Departmanı Sil"
+                                                >
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
 
@@ -468,6 +485,16 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                                                                 <Edit3 className="h-2.5 w-2.5" />
                                                             </button>
                                                             <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation()
+                                                                    handleDeleteFolder(subFolder.id)
+                                                                }}
+                                                                className="p-1 hover:bg-white/20 rounded text-white/40 hover:text-red-400"
+                                                                title="Birimi Sil"
+                                                            >
+                                                                <Trash2 className="h-2.5 w-2.5" />
+                                                            </button>
+                                                            <button
                                                                 onClick={() => setIsAddingList(`list-${subFolder.id}`)}
                                                                 className="p-1 hover:bg-white/20 rounded text-white/40 hover:text-blue-400"
                                                                 title="Liste Ekle"
@@ -520,17 +547,30 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                                                                             list.title
                                                                         )}
                                                                     </button>
-                                                                    {!editingListId && (
-                                                                        <button
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation()
-                                                                                setEditingListId(list.id)
-                                                                                setEditText(list.title)
-                                                                            }}
-                                                                            className="absolute right-1 opacity-0 group-hover/list:opacity-100 p-1 hover:bg-white/20 rounded text-white/30 hover:text-white"
-                                                                        >
-                                                                            <Edit3 className="h-2 w-2" />
-                                                                        </button>
+                                                                    {editingListId !== list.id && (
+                                                                        <div className="absolute right-1 opacity-0 group-hover/list:opacity-100 flex items-center gap-0.5">
+                                                                            <button
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation()
+                                                                                    setEditingListId(list.id)
+                                                                                    setEditText(list.title)
+                                                                                }}
+                                                                                className="p-1 hover:bg-white/20 rounded text-white/30 hover:text-white"
+                                                                                title="Listeyi yeniden adlandır"
+                                                                            >
+                                                                                <Edit3 className="h-2 w-2" />
+                                                                            </button>
+                                                                            <button
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation()
+                                                                                    handleDeleteList(list.id)
+                                                                                }}
+                                                                                className="p-1 hover:bg-white/20 rounded text-white/30 hover:text-red-400"
+                                                                                title="Listeyi sil"
+                                                                            >
+                                                                                <Trash2 className="h-2 w-2" />
+                                                                            </button>
+                                                                        </div>
                                                                     )}
                                                                 </div>
                                                             ))}

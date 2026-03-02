@@ -25,11 +25,12 @@ export async function GET(request: NextRequest) {
 
         const role = userProfile[0].ROLE || userProfile[0].role
         const branch = userProfile[0].BRANCH || userProfile[0].branch
+        const isAllBranches = branch === 'Tüm Şubeler' || branch === 'TUM_SUBELER' || branch === 'ALL'
         const { searchParams } = new URL(request.url)
         const query = searchParams.get('q')
 
         // SECRETARY: Show ALL users in their branch (no search needed)
-        if (role === 'secretary' && branch) {
+        if (role === 'secretary' && branch && !isAllBranches) {
             const profiles = await executeQuery(
                 `SELECT id, email, full_name, avatar_url, department, branch
                  FROM profiles

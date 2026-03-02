@@ -5,6 +5,7 @@ echo   NeoList Telegram Bot - Quick Start
 echo ========================================
 echo.
 echo This script will help you start everything in order.
+if "%APP_PORT%"=="" set "APP_PORT=4554"
 echo.
 echo STEP 1: Starting Dev Server...
 echo.
@@ -35,11 +36,11 @@ if %errorlevel% neq 0 (
 echo.
 echo ✓ ngrok found
 echo.
-start "ngrok" cmd /k "ngrok http 3000"
+start "ngrok" cmd /k "ngrok http %APP_PORT%"
 timeout /t 3 /nobreak >nul
 echo.
 echo ✓ ngrok starting in new window
-echo   Copy the https://...ngrok-free.app URL
+echo   Copy the https://...ngrok-free.app URL (%APP_PORT% portu)
 echo.
 pause
 echo.

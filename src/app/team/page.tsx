@@ -1,32 +1,61 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Progress } from '@/components/ui/progress'
-import { Trophy, Users, BarChart, Download } from 'lucide-react'
+import { Trophy, Users, Download, ArrowLeft } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 interface TeamMember {
     id: string;
     name: string;
     department: string;
+    department_name?: string | null;
+    unit_name?: string | null;
     avatar_url: string;
     total_tasks: number;
     completed_tasks: number;
     ratio: number;
 }
 
+interface TeamResponse {
+    stats: TeamMember[];
+    filterOptions?: {
+        departments: string[];
+        units: Array<{ name: string; department: string }>;
+    };
+}
+
 export default function TeamPage() {
+    const router = useRouter()
     const [stats, setStats] = useState<TeamMember[]>([])
+    const [departments, setDepartments] = useState<string[]>([])
+    const [units, setUnits] = useState<Array<{ name: string; department: string }>>([])
+    const [selectedDepartment, setSelectedDepartment] = useState('')
+    const [selectedUnit, setSelectedUnit] = useState('')
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
         const fetchStats = async () => {
             try {
-                const res = await fetch('/api/stats/team')
+                const params = new URLSearchParams()
+                if (selectedDepartment) params.set('department', selectedDepartment)
+                if (selectedUnit) params.set('unit', selectedUnit)
+                const endpoint = params.toString() ? `/api/stats/team?${params.toString()}` : '/api/stats/team'
+                const res = await fetch(endpoint)
                 if (res.ok) {
-                    const data = await res.json()
-                    setStats(data)
+                    const data = await res.json() as TeamResponse | TeamMember[]
+                    if (Array.isArray(data)) {
+                        setStats(data)
+                        setDepartments([])
+                        setUnits([])
+                    } else {
+                        setStats(data.stats || [])
+                        setDepartments(data.filterOptions?.departments || [])
+                        setUnits(data.filterOptions?.units || [])
+                    }
                 }
             } catch (error) {
                 console.error('Failed to fetch stats', error)
@@ -36,7 +65,20 @@ export default function TeamPage() {
         }
 
         fetchStats()
-    }, [])
+    }, [selectedDepartment, selectedUnit])
+
+    useEffect(() => {
+        if (selectedDepartment && selectedUnit) {
+            const selectedUnitMeta = units.find((item) => item.name === selectedUnit)
+            if (selectedUnitMeta && selectedUnitMeta.department !== selectedDepartment) {
+                setSelectedUnit('')
+            }
+        }
+    }, [selectedDepartment, selectedUnit, units])
+
+    const filteredUnits = selectedDepartment
+        ? units.filter((unit) => unit.department === selectedDepartment)
+        : units
 
     if (loading) {
         return <div className="p-8 text-center text-muted-foreground">Yükleniyor...</div>
@@ -46,6 +88,9 @@ export default function TeamPage() {
         <div className="min-h-screen bg-background p-4 md:p-8 space-y-8">
             <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                 <div className="flex items-center gap-3">
+                    <Button variant="outline" size="icon" onClick={() => router.back()}>
+                        <ArrowLeft className="h-4 w-4" />
+                    </Button>
                     <div className="h-10 w-10 rounded-lg bg-[#FF671F] flex items-center justify-center shadow-lg shadow-orange-500/20">
                         <Users className="h-6 w-6 text-white" />
                     </div>
@@ -73,6 +118,37 @@ export default function TeamPage() {
                     Raporu İndir (.csv)
                 </button>
             </header>
+
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                <select
+                    value={selectedDepartment}
+                    onChange={(e) => {
+                        setSelectedDepartment(e.target.value)
+                        setSelectedUnit('')
+                    }}
+                    className="w-full px-3 py-2 border rounded-md bg-background"
+                >
+                    <option value="">Tüm Departmanlar</option>
+                    {departments.map((department) => (
+                        <option key={department} value={department}>
+                            {department}
+                        </option>
+                    ))}
+                </select>
+
+                <select
+                    value={selectedUnit}
+                    onChange={(e) => setSelectedUnit(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-md bg-background"
+                >
+                    <option value="">Tüm Birimler</option>
+                    {filteredUnits.map((unit) => (
+                        <option key={`${unit.department}-${unit.name}`} value={unit.name}>
+                            {unit.name}
+                        </option>
+                    ))}
+                </select>
+            </div>
 
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                 {stats.map((member, index) => (

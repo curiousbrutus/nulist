@@ -11,6 +11,15 @@ export interface Profile {
     job_title?: string;
     phone?: string;
     manager_id?: string;
+    manager_ids?: string[];
+    managers?: Array<{
+        id: string;
+        full_name?: string;
+        email?: string;
+        department?: string;
+        branch?: string;
+        is_primary?: number;
+    }>;
     is_profile_complete?: number;
     zimbra_sync_enabled?: number;
     zimbra_last_sync?: string;
@@ -86,6 +95,10 @@ export interface Task {
     is_private?: boolean; // Privacy flag - only assignees/creator see task
     branch?: string; // Hospital branch for filtering
     meeting_type?: string; // Meeting type for secretary exports
+    recurrence_enabled?: number;
+    recurrence_mode?: 'fixed_schedule' | 'completion_driven';
+    recurrence_interval_days?: number;
+    recurrence_parent_task_id?: string;
     task_assignees?: TaskAssignee[]; // Çoklu atama desteği
     comments?: Comment[];
     attachments?: TaskAttachment[]; // Dosya ekleri

@@ -1,29 +1,51 @@
 /**
  * Setup Telegram Webhook
- * 
- * This script registers your webhook URL with Telegram
- * Run AFTER your dev server is running on a public URL (ngrok/cloudflare tunnel)
- * 
- * Usage:
- *   node setup-telegram-webhook.js https://your-public-url.com
+ *
+ * Priority:
+ * 1) CLI arg (domain or full webhook URL)
+ * 2) TELEGRAM_WEBHOOK_URL
+ * 3) NEXTAUTH_URL + /api/telegram/webhook
  */
 
-const TOKEN = '8506599800:AAE-5hw51xThKpg_Uy3hbOEJd8nQ_3E_oHc'
+require('dotenv').config({ path: '.env.local' })
 
-async function setupWebhook(publicUrl) {
-    if (!publicUrl) {
-        console.error('❌ Error: Please provide your public URL')
-        console.log('\nUsage:')
-        console.log('  node setup-telegram-webhook.js https://your-domain.com')
-        console.log('\nFor local development, use ngrok or cloudflare tunnel:')
-        console.log('  ngrok http 3000')
-        console.log('  Then use the ngrok URL: https://abc123.ngrok.io')
+const TOKEN = process.env.TELEGRAM_BOT_TOKEN
+
+function resolveWebhookUrl(inputUrl) {
+    if (inputUrl) {
+        const cleaned = inputUrl.replace(/\/$/, '')
+        if (cleaned.endsWith('/api/telegram/webhook')) {
+            return cleaned
+        }
+        return `${cleaned}/api/telegram/webhook`
+    }
+
+    if (process.env.TELEGRAM_WEBHOOK_URL) {
+        return process.env.TELEGRAM_WEBHOOK_URL.replace(/\/$/, '')
+    }
+
+    if (process.env.NEXTAUTH_URL) {
+        return `${process.env.NEXTAUTH_URL.replace(/\/$/, '')}/api/telegram/webhook`
+    }
+
+    return null
+}
+
+async function setupWebhook(inputUrl) {
+    if (!TOKEN) {
+        console.error('❌ Error: TELEGRAM_BOT_TOKEN is missing (.env.local)')
         process.exit(1)
     }
 
-    // Remove trailing slash
-    publicUrl = publicUrl.replace(/\/$/, '')
-    const webhookUrl = `${publicUrl}/api/telegram/webhook`
+    const webhookUrl = resolveWebhookUrl(inputUrl)
+
+    if (!webhookUrl) {
+        console.error('❌ Error: Please provide webhook URL or set TELEGRAM_WEBHOOK_URL/NEXTAUTH_URL')
+        console.log('\nUsage:')
+        console.log('  node setup-telegram-webhook.js https://your-domain.com')
+        console.log('  node setup-telegram-webhook.js https://your-domain.com/api/telegram/webhook')
+        process.exit(1)
+    }
 
     console.log('🔧 Setting up Telegram webhook...\n')
     console.log(`📍 Webhook URL: ${webhookUrl}\n`)
@@ -64,6 +86,5 @@ async function setupWebhook(publicUrl) {
     }
 }
 
-// Get URL from command line argument
-const publicUrl = process.argv[2]
-setupWebhook(publicUrl)
+const inputUrl = process.argv[2]
+setupWebhook(inputUrl)

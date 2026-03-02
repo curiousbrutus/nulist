@@ -37,6 +37,26 @@ function normalizePriorityFromDB(task: any): any {
     return task
 }
 
+function normalizeRecurrenceMode(mode: any): 'fixed_schedule' | 'completion_driven' | null {
+    if (mode === 'fixed_schedule' || mode === 'completion_driven') {
+        return mode
+    }
+    return null
+}
+
+function normalizeRecurrenceIntervalDays(interval: any): number | null {
+    if (interval === undefined || interval === null || interval === '') return null
+    const parsed = Number(interval)
+    if (!Number.isFinite(parsed) || parsed < 1) return null
+    return Math.floor(parsed)
+}
+
+function addDays(baseDate: Date, days: number): Date {
+    const next = new Date(baseDate)
+    next.setDate(next.getDate() + days)
+    return next
+}
+
 // GET /api/tasks/[id] - Task detayı (assignees, comments, attachments ile)
 export async function GET(
     request: NextRequest,
@@ -237,7 +257,16 @@ export async function PUT(
         }
 
         const body = await request.json()
-        let { title, notes, due_date, priority, completed } = body
+        let {
+            title,
+            notes,
+            due_date,
+            priority,
+            completed,
+            recurrence_enabled,
+            recurrence_mode,
+            recurrence_interval_days
+        } = body
 
         console.log('PUT /api/tasks/[id] - Request body:', { title, notes, due_date, priority, completed })
 
@@ -317,6 +346,35 @@ export async function PUT(
             queryParams.is_completed_val = completed ? 1 : 0
         }
 
+        if (recurrence_enabled !== undefined) {
+            updates.push('recurrence_enabled = :recurrence_enabled_val')
+            queryParams.recurrence_enabled_val = recurrence_enabled ? 1 : 0
+        }
+
+        if (recurrence_mode !== undefined) {
+            const normalizedRecurrenceMode = normalizeRecurrenceMode(recurrence_mode)
+            if (!normalizedRecurrenceMode) {
+                return NextResponse.json(
+                    { error: 'Invalid recurrence_mode. Use fixed_schedule or completion_driven.' },
+                    { status: 400 }
+                )
+            }
+            updates.push('recurrence_mode = :recurrence_mode_val')
+            queryParams.recurrence_mode_val = normalizedRecurrenceMode
+        }
+
+        if (recurrence_interval_days !== undefined) {
+            const normalizedInterval = normalizeRecurrenceIntervalDays(recurrence_interval_days)
+            if (!normalizedInterval) {
+                return NextResponse.json(
+                    { error: 'recurrence_interval_days must be a positive integer' },
+                    { status: 400 }
+                )
+            }
+            updates.push('recurrence_interval_days = :recurrence_interval_days_val')
+            queryParams.recurrence_interval_days_val = normalizedInterval
+        }
+
         if (updates.length === 0) {
             return NextResponse.json(
                 { error: 'No fields to update' },
@@ -341,6 +399,55 @@ export async function PUT(
             { id: resolvedParams.id },
             session.user.id
         )
+
+        const updatedTask = tasks[0]
+
+        if (
+            completed === true &&
+            updatedTask?.recurrence_enabled === 1 &&
+            updatedTask?.recurrence_mode === 'completion_driven' &&
+            updatedTask?.recurrence_interval_days
+        ) {
+            const existingNext = await executeQuery(
+                `SELECT id FROM tasks
+                 WHERE recurrence_parent_task_id = :task_id
+                   AND is_completed = 0`,
+                { task_id: resolvedParams.id },
+                session.user.id
+            )
+
+            if (existingNext.length === 0) {
+                const intervalDays = Number(updatedTask.recurrence_interval_days)
+                const dueDateBase = updatedTask.due_date ? new Date(updatedTask.due_date) : new Date()
+                const nextDueDate = addDays(dueDateBase, intervalDays)
+                const nextTaskId = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+
+                await executeNonQuery(
+                    `INSERT INTO tasks (
+                        id, list_id, title, notes, due_date, priority, created_by, is_completed,
+                        recurrence_enabled, recurrence_mode, recurrence_interval_days, recurrence_parent_task_id
+                    ) VALUES (
+                        :id, :list_id, :title, :notes, :due_date, :priority, :created_by, :is_completed,
+                        :recurrence_enabled, :recurrence_mode, :recurrence_interval_days, :recurrence_parent_task_id
+                    )`,
+                    {
+                        id: nextTaskId,
+                        list_id: updatedTask.list_id,
+                        title: updatedTask.title,
+                        notes: updatedTask.notes,
+                        due_date: nextDueDate,
+                        priority: updatedTask.priority,
+                        created_by: updatedTask.created_by || session.user.id,
+                        is_completed: 0,
+                        recurrence_enabled: 1,
+                        recurrence_mode: 'completion_driven',
+                        recurrence_interval_days: intervalDays,
+                        recurrence_parent_task_id: resolvedParams.id
+                    },
+                    session.user.id
+                )
+            }
+        }
 
         // Sync updates to Zimbra if applicable
         try {
@@ -389,7 +496,7 @@ export async function PUT(
             console.error('Zimbra sync update error:', syncErr)
         }
 
-        return NextResponse.json(normalizePriorityFromDB(tasks[0]))
+        return NextResponse.json(normalizePriorityFromDB(updatedTask))
     } catch (error: any) {
         console.error('PUT /api/tasks/[id] error:', error)
         console.error('Error details:', {

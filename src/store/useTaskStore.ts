@@ -356,7 +356,12 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         if (res.ok) {
             await get().fetchInitialData()
         } else {
-            useToastStore.getState().showToast('Klasör silinemedi', 'error')
+            let message = 'Klasör silinemedi'
+            try {
+                const data = await res.json()
+                if (data?.error) message = data.error
+            } catch {}
+            useToastStore.getState().showToast(message, 'error')
         }
     },
 
@@ -384,7 +389,12 @@ export const useTaskStore = create<TaskState>((set, get) => ({
             }
             useToastStore.getState().showToast('Liste silindi', 'success')
         } else {
-            useToastStore.getState().showToast('Liste silinemedi', 'error')
+            let message = 'Liste silinemedi'
+            try {
+                const data = await res.json()
+                if (data?.error) message = data.error
+            } catch {}
+            useToastStore.getState().showToast(message, 'error')
         }
     },
 

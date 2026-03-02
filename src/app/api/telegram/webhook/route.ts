@@ -10,109 +10,111 @@ const registrationFlows = new Map<number, { step: string; data: any }>()
 // POST /api/telegram/webhook - Telegram webhook handler
 export async function POST(request: NextRequest) {
     try {
-        if (!bot) {
-            return NextResponse.json({ error: 'Bot not initialized' }, { status: 500 })
-        }
-
         const update = await request.json()
 
-        // Handle callback queries (inline button clicks)
-        if (update.callback_query) {
-            await handleCallbackQuery(update.callback_query)
-            return NextResponse.json({ ok: true })
-        }
-
-        // Handle text messages
-        if (update.message && update.message.text) {
-            const message = update.message
-            const chatId = message.chat.id
-            const text = message.text
-            const telegramUserId = String(message.from?.id)
-
-            // Check if user exists
-            const user = await getUserByTelegramId(telegramUserId)
-
-            if (text === '/start') {
-                registrationFlows.delete(chatId)
-                if (user) {
-                    await bot.sendMessage(
-                        chatId,
-                        `Merhaba ${user.full_name}! 👋\n\n` +
-                        `NeoList hesabınız zaten bağlı.\n\n` +
-                        `Komutlar:\n` +
-                        `/tasks - Görevlerimi göster\n` +
-                        `/help - Yardım`
-                    )
-                } else {
-                    // Start registration
-                    registrationFlows.set(chatId, { step: 'email', data: { telegram_user_id: telegramUserId } })
-                    await bot.sendMessage(
-                        chatId,
-                        `🎯 NeoList'e Hoş Geldiniz!\n\n` +
-                        `Hesabınızı bağlamak için lütfen e-posta adresinizi girin:\n\n` +
-                        `Örnek: mehmet@optimedhastanetakip.com`
-                    )
-                }
-            } else if (text === '/tasks') {
-                registrationFlows.delete(chatId)
-                if (!user) {
-                    await bot.sendMessage(
-                        chatId,
-                        `❌ Hesabınız bağlı değil.\n\n` +
-                        `/start komutunu kullanarak kaydolun.`
-                    )
-                } else {
-                    await sendUserTasks(chatId, user.id)
-                }
-            } else if (text === '/help') {
-                registrationFlows.delete(chatId)
-                await bot.sendMessage(
-                    chatId,
-                    `📋 NeoList Bot Komutları:\n\n` +
-                    `/start - Kaydol / Başla\n` +
-                    `/tasks - Görevlerimi göster\n` +
-                    `/cancel - İşlemi iptal et\n` +
-                    `/help - Bu yardım mesajı\n\n` +
-                    `Görevlerinizin durumunu değiştirmek için görev listesindeki butonları kullanın.`
-                )
-            } else if (text === '/cancel') {
-                const flow = registrationFlows.get(chatId)
-                registrationFlows.delete(chatId)
-                if (flow) {
-                    await bot.sendMessage(chatId, '❌ İşlem iptal edildi.')
-                } else {
-                    await bot.sendMessage(chatId, 'İptal edilecek bir işlem yok.')
-                }
-            } else {
-                // Handle registration or note flow
-                const flow = registrationFlows.get(chatId)
-                if (flow) {
-                    if (flow.step === 'write_note') {
-                        await handleNoteFlow(chatId, text, flow)
-                    } else {
-                        await handleRegistrationFlow(chatId, text, flow)
-                    }
-                } else if (!user) {
-                    await bot.sendMessage(
-                        chatId,
-                        `Lütfen önce /start komutunu kullanın.`
-                    )
-                } else {
-                    await bot.sendMessage(
-                        chatId,
-                        `Geçersiz komut. /help yazarak komutları görebilirsiniz.`
-                    )
-                }
-            }
-        }
+        processTelegramUpdate(update).catch((error: any) => {
+            console.error('Telegram async processing error:', error)
+        })
 
         return NextResponse.json({ ok: true })
     } catch (error: any) {
-        console.error('Telegram webhook error:', error)
-        return NextResponse.json(
-            { error: 'Webhook error', details: error.message },
-            { status: 500 }
-        )
+        console.error('Telegram webhook parse error:', error)
+        return NextResponse.json({ ok: true })
+    }
+}
+
+async function processTelegramUpdate(update: any) {
+    if (!bot) {
+        console.warn('Telegram webhook received update but bot is not initialized')
+        return
+    }
+
+    // Handle callback queries (inline button clicks)
+    if (update.callback_query) {
+        await handleCallbackQuery(update.callback_query)
+        return
+    }
+
+    // Handle text messages
+    if (update.message && update.message.text) {
+        const message = update.message
+        const chatId = message.chat.id
+        const text = message.text
+        const telegramUserId = String(message.from?.id)
+
+        // Check if user exists
+        const user = await getUserByTelegramId(telegramUserId)
+
+        if (text === '/start') {
+            registrationFlows.delete(chatId)
+            if (user) {
+                await bot.sendMessage(
+                    chatId,
+                    `Merhaba ${user.full_name}! 👋\n\n` +
+                    `NeoList hesabınız zaten bağlı.\n\n` +
+                    `Komutlar:\n` +
+                    `/tasks - Görevlerimi göster\n` +
+                    `/help - Yardım`
+                )
+            } else {
+                registrationFlows.set(chatId, { step: 'email', data: { telegram_user_id: telegramUserId } })
+                await bot.sendMessage(
+                    chatId,
+                    `🎯 NeoList'e Hoş Geldiniz!\n\n` +
+                    `Hesabınızı bağlamak için lütfen e-posta adresinizi girin:\n\n` +
+                    `Örnek: mehmet@optimedhastanetakip.com`
+                )
+            }
+        } else if (text === '/tasks') {
+            registrationFlows.delete(chatId)
+            if (!user) {
+                await bot.sendMessage(
+                    chatId,
+                    `❌ Hesabınız bağlı değil.\n\n` +
+                    `/start komutunu kullanarak kaydolun.`
+                )
+            } else {
+                await sendUserTasks(chatId, user.id)
+            }
+        } else if (text === '/help') {
+            registrationFlows.delete(chatId)
+            await bot.sendMessage(
+                chatId,
+                `📋 NeoList Bot Komutları:\n\n` +
+                `/start - Kaydol / Başla\n` +
+                `/tasks - Görevlerimi göster\n` +
+                `/cancel - İşlemi iptal et\n` +
+                `/help - Bu yardım mesajı\n\n` +
+                `Görevlerinizin durumunu değiştirmek için görev listesindeki butonları kullanın.`
+            )
+        } else if (text === '/cancel') {
+            const flow = registrationFlows.get(chatId)
+            registrationFlows.delete(chatId)
+            if (flow) {
+                await bot.sendMessage(chatId, '❌ İşlem iptal edildi.')
+            } else {
+                await bot.sendMessage(chatId, 'İptal edilecek bir işlem yok.')
+            }
+        } else {
+            const flow = registrationFlows.get(chatId)
+            if (flow) {
+                if (flow.step === 'write_note') {
+                    await handleNoteFlow(chatId, text, flow)
+                } else {
+                    await handleRegistrationFlow(chatId, text, flow)
+                }
+            } else if (!user) {
+                await bot.sendMessage(
+                    chatId,
+                    `Lütfen önce /start komutunu kullanın.`
+                )
+            } else {
+                await bot.sendMessage(
+                    chatId,
+                    `Geçersiz komut. /help yazarak komutları görebilirsiniz.`
+                )
+            }
+        }
     }
 }
 

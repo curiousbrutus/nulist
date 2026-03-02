@@ -7,7 +7,7 @@ module.exports = {
             cwd: 'C:\\Users\\Administrator\\Desktop\\neolist',
             env: {
                 NODE_ENV: 'production',
-                PORT: 3000,
+                PORT: 4554,
                 TNS_ADMIN: 'C:\\app\\oracle\\product\\12.1.0\\client_1\\network\\admin',
                 ORACLE_HOME: 'C:\\app\\oracle\\product\\12.1.0\\client_1',
                 NLS_LANG: 'TURKISH_TURKEY.AL32UTF8'
@@ -54,6 +54,31 @@ module.exports = {
             autorestart: true,
             watch: false,
             restart_delay: 300000 // 5 minutes
+        },
+        {
+            name: 'nginx',
+            script: 'C:\\nginx\\nginx.exe',
+            args: '-p C:\\nginx',
+            interpreter: 'none',
+            autorestart: true,
+            watch: false
+        },
+        {
+            name: 'telegram-polling-bridge',
+            script: 'scripts/telegram/polling-bridge.js',
+            cwd: 'C:\\Users\\Administrator\\Desktop\\neolist',
+            env: {
+                NODE_ENV: 'production',
+                APP_PORT: 4554
+            },
+            instances: 1,
+            exec_mode: 'fork',
+            autorestart: true,
+            watch: false,
+            max_memory_restart: '300M',
+            error_file: './logs/telegram-polling-err.log',
+            out_file: './logs/telegram-polling-out.log',
+            log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
         }
     ]
 }

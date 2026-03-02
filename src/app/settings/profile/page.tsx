@@ -14,22 +14,67 @@ export default function ProfilePage() {
     const { user, profile, setProfile } = useAuthStore()
     const [fullName, setFullName] = useState(profile?.full_name || '')
     const [department, setDepartment] = useState(profile?.department || '')
+    const [jobTitle, setJobTitle] = useState(profile?.job_title || '')
+    const [phone, setPhone] = useState(profile?.phone || '')
     const [role, setRole] = useState(profile?.role || 'user')
     const [branch, setBranch] = useState(profile?.branch || '')
     const [meetingType, setMeetingType] = useState(profile?.meeting_type || '')
+    const [managerCandidates, setManagerCandidates] = useState<any[]>([])
+    const [selectedManagerIds, setSelectedManagerIds] = useState<string[]>([])
+    const [candidateToAdd, setCandidateToAdd] = useState('')
     const [loading, setLoading] = useState(false)
     const { showToast } = useToast()
     const router = useRouter()
 
     useEffect(() => {
+        const loadManagerCandidates = async () => {
+            try {
+                const res = await fetch('/api/profiles/managers')
+                if (res.ok) {
+                    const data = await res.json()
+                    setManagerCandidates(Array.isArray(data) ? data : [])
+                }
+            } catch {
+                // Silent fail, page still works without manager suggestions
+            }
+        }
+
+        loadManagerCandidates()
+    }, [])
+
+    useEffect(() => {
         if (profile) {
             setFullName(profile.full_name || '')
             setDepartment(profile.department || '')
+            setJobTitle(profile.job_title || '')
+            setPhone(profile.phone || '')
             setRole(profile.role || 'user')
             setBranch(profile.branch || '')
             setMeetingType(profile.meeting_type || '')
+            const idsFromProfile = Array.isArray(profile.manager_ids)
+                ? profile.manager_ids
+                : profile.manager_id
+                    ? [profile.manager_id]
+                    : []
+            setSelectedManagerIds(idsFromProfile)
+
+            if (Array.isArray(profile.managers) && profile.managers.length > 0) {
+                setManagerCandidates((prev) => {
+                    const existingIds = new Set(prev.map((item) => item.id))
+                    const merged = [...prev]
+                    profile.managers?.forEach((manager) => {
+                        if (!existingIds.has(manager.id)) {
+                            merged.push(manager)
+                        }
+                    })
+                    return merged
+                })
+            }
         }
     }, [profile])
+
+    const selectedManagers = managerCandidates.filter((candidate) => selectedManagerIds.includes(candidate.id))
+    const availableManagers = managerCandidates.filter((candidate) => !selectedManagerIds.includes(candidate.id))
 
     const handleUpdate = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -43,9 +88,12 @@ export default function ProfilePage() {
                 body: JSON.stringify({
                     full_name: fullName,
                     department: department,
+                    job_title: jobTitle,
+                    phone: phone,
                     role: role,
                     branch: branch,
-                    meeting_type: meetingType
+                    meeting_type: meetingType,
+                    manager_ids: selectedManagerIds
                 })
             })
 
@@ -58,9 +106,13 @@ export default function ProfilePage() {
                     ...profile!,
                     full_name: fullName,
                     department: department,
+                    job_title: jobTitle,
+                    phone: phone,
                     role: role as any,
                     branch: branch,
-                    meeting_type: meetingType
+                    meeting_type: meetingType,
+                    manager_ids: selectedManagerIds,
+                    manager_id: selectedManagerIds[0]
                 })
                 showToast('Profil başarıyla güncellendi!', 'success')
                 router.push('/')
@@ -115,6 +167,91 @@ export default function ProfilePage() {
                             </div>
                         </div>
 
+                        <div className="grid gap-6 md:grid-cols-2">
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium">Ünvan</label>
+                                <Input
+                                    value={jobTitle}
+                                    onChange={(e) => setJobTitle(e.target.value)}
+                                    placeholder="Örn: Sorumlu Hemşire"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium">Telefon</label>
+                                <Input
+                                    value={phone}
+                                    onChange={(e) => setPhone(e.target.value)}
+                                    placeholder="Örn: 05xx xxx xx xx"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium">Hastane Şubesi</label>
+                            <select
+                                value={branch}
+                                onChange={(e) => setBranch(e.target.value)}
+                                className="w-full px-3 py-2 border rounded-md bg-background"
+                            >
+                                <option value="">Şube Seçin</option>
+                                <option value="Tüm Şubeler">Tüm Şubeler</option>
+                                <option value="Çorlu">Çorlu</option>
+                                <option value="Kapaklı">Kapaklı</option>
+                                <option value="Çerkezköy">Çerkezköy</option>
+                            </select>
+                        </div>
+
+                        <div className="space-y-3">
+                            <label className="text-sm font-medium">Yöneticilerim</label>
+                            <div className="flex gap-2">
+                                <select
+                                    value={candidateToAdd}
+                                    onChange={(e) => setCandidateToAdd(e.target.value)}
+                                    className="w-full px-3 py-2 border rounded-md bg-background"
+                                >
+                                    <option value="">Yönetici seçin</option>
+                                    {availableManagers.map((manager) => (
+                                        <option key={manager.id} value={manager.id}>
+                                            {manager.full_name || manager.email} {manager.branch ? `(${manager.branch})` : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => {
+                                        if (!candidateToAdd) return
+                                        setSelectedManagerIds((prev) => [...prev, candidateToAdd])
+                                        setCandidateToAdd('')
+                                    }}
+                                    disabled={!candidateToAdd}
+                                >
+                                    Ekle
+                                </Button>
+                            </div>
+
+                            <div className="space-y-2">
+                                {selectedManagers.length === 0 && (
+                                    <p className="text-sm text-muted-foreground">Henüz yönetici seçmediniz.</p>
+                                )}
+                                {selectedManagers.map((manager) => (
+                                    <div key={manager.id} className="flex items-center justify-between rounded-md border px-3 py-2">
+                                        <div>
+                                            <p className="text-sm font-medium">{manager.full_name || manager.email}</p>
+                                            <p className="text-xs text-muted-foreground">{manager.department || '-'} {manager.branch ? `• ${manager.branch}` : ''}</p>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            onClick={() => setSelectedManagerIds((prev) => prev.filter((id) => id !== manager.id))}
+                                        >
+                                            Kaldır
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
                         {isSuperadmin && (
                             <div className="grid gap-6 md:grid-cols-2">
                                 <div className="space-y-2">
@@ -130,19 +267,7 @@ export default function ProfilePage() {
                                         <option value="superadmin">Superadmin</option>
                                     </select>
                                 </div>
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium">Hastane Şubesi</label>
-                                    <select
-                                        value={branch}
-                                        onChange={(e) => setBranch(e.target.value)}
-                                        className="w-full px-3 py-2 border rounded-md bg-background"
-                                    >
-                                        <option value="">Şube Seçin</option>
-                                        <option value="Çorlu">Çorlu</option>
-                                        <option value="Kapaklı">Kapaklı</option>
-                                        <option value="Çerkezköy">Çerkezköy</option>
-                                    </select>
-                                </div>
+                                <div className="space-y-2" />
                             </div>
                         )}
 

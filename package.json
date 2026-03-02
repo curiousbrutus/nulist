@@ -5,14 +5,17 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:https": "node scripts/start-https.js",
     "build": "next build",
     "start": "next start",
+    "start:https": "set NODE_ENV=production&& node scripts/start-https.js",
     "lint": "eslint",
     "test": "vitest",
     "test:run": "vitest run",
     "setup": "node scripts/setup.js",
     "db:migrate": "npx tsx scripts/db/migrate.ts",
-    "telegram:setup-webhook": "node setup-telegram-webhook.js"
+    "telegram:setup-webhook": "node setup-telegram-webhook.js",
+    "telegram:start-polling": "node scripts/telegram/polling-bridge.js"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

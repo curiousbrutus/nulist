@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
-import { executeQuery, executeNonQuery } from '@/lib/oracle'
+import { executeQuery, executeNonQuery, executeTransaction } from '@/lib/oracle'
 
 export const runtime = 'nodejs'
 
@@ -54,18 +54,45 @@ export async function PUT(
         const body = await request.json()
         const { title, folder_id } = body
 
-        if (!title || typeof title !== 'string') {
+        const updates: string[] = ['updated_at = SYSTIMESTAMP']
+        const queryParams: any = { id: resolvedParams.id }
+
+        if (title !== undefined) {
+            if (typeof title !== 'string' || title.trim().length === 0) {
+                return NextResponse.json(
+                    { error: 'Title must be a non-empty string' },
+                    { status: 400 }
+                )
+            }
+
+            updates.push('title = :title')
+            queryParams.title = title.trim()
+        }
+
+        if (folder_id !== undefined) {
+            if (typeof folder_id !== 'string' || folder_id.trim().length === 0) {
+                return NextResponse.json(
+                    { error: 'folder_id must be a non-empty string' },
+                    { status: 400 }
+                )
+            }
+
+            updates.push('folder_id = :folder_id')
+            queryParams.folder_id = folder_id.trim()
+        }
+
+        if (updates.length === 1) {
             return NextResponse.json(
-                { error: 'Title is required' },
+                { error: 'No fields to update' },
                 { status: 400 }
             )
         }
 
         const result = await executeNonQuery(
             `UPDATE lists 
-             SET title = :title, folder_id = :folder_id, updated_at = SYSTIMESTAMP
+             SET ${updates.join(', ')}
              WHERE id = :id`,
-            { id: resolvedParams.id, title, folder_id: folder_id || null },
+            queryParams,
             session.user.id
         )
 
@@ -103,6 +130,44 @@ export async function DELETE(
         if (!session?.user) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
+
+        const taskRows = await executeQuery<{ id: string }>(
+            `SELECT id FROM tasks WHERE list_id = :list_id`,
+            { list_id: resolvedParams.id },
+            session.user.id
+        )
+
+        const taskIds = taskRows.map((row) => row.id)
+
+        await executeTransaction(async (connection: any) => {
+            if (taskIds.length > 0) {
+                const placeholders = taskIds.map((_, index) => `:task_id_${index}`).join(', ')
+                const bindParams: Record<string, any> = {}
+                taskIds.forEach((taskId, index) => {
+                    bindParams[`task_id_${index}`] = taskId
+                })
+
+                await connection.execute(
+                    `UPDATE tasks
+                     SET recurrence_parent_task_id = NULL
+                     WHERE recurrence_parent_task_id IN (${placeholders})`,
+                    bindParams,
+                    { autoCommit: false }
+                )
+
+                await connection.execute(
+                    `DELETE FROM sync_queue WHERE task_id IN (${placeholders})`,
+                    bindParams,
+                    { autoCommit: false }
+                )
+            }
+
+            await connection.execute(
+                `DELETE FROM tasks WHERE list_id = :list_id`,
+                { list_id: resolvedParams.id },
+                { autoCommit: false }
+            )
+        }, session.user.id)
 
         const result = await executeNonQuery(
             `DELETE FROM lists WHERE id = :id`,

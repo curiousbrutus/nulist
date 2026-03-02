@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
-import { executeQuery, executeNonQuery } from '@/lib/oracle'
+import { executeQuery, executeTransaction } from '@/lib/oracle'
 
 export const runtime = 'nodejs'
 
@@ -46,7 +46,27 @@ export async function GET(request: NextRequest) {
                 return NextResponse.json({ error: 'Profile not found' }, { status: 404 })
             }
 
-            return NextResponse.json(profiles[0])
+            const currentProfile = profiles[0] as any
+            const managers = await executeQuery(
+                `SELECT pm.manager_id AS id,
+                        pm.is_primary,
+                        p.full_name,
+                        p.email,
+                        p.department,
+                        p.branch
+                 FROM profile_managers pm
+                 JOIN profiles p ON p.id = pm.manager_id
+                 WHERE pm.profile_id = :profile_id
+                 ORDER BY pm.is_primary DESC, p.full_name ASC`,
+                { profile_id: currentProfile.id },
+                session.user.id
+            )
+
+            return NextResponse.json({
+                ...currentProfile,
+                manager_ids: managers.map((m: any) => m.id),
+                managers
+            })
         } catch (dbError: any) {
             console.error('[/api/profiles/me] DB error', dbError)
             return NextResponse.json({ error: 'DB error', detail: dbError?.message }, { status: 500 })
@@ -70,16 +90,29 @@ export async function PUT(request: NextRequest) {
         }
 
         body = await request.json()
-        const { full_name, avatar_url, department, role, branch, meeting_type, zimbra_sync_enabled, telegram_user_id } = body
+        const {
+            full_name,
+            avatar_url,
+            department,
+            role,
+            branch,
+            meeting_type,
+            zimbra_sync_enabled,
+            telegram_user_id,
+            job_title,
+            phone,
+            manager_ids
+        } = body
 
         // Check if user is superadmin for role changes
         const currentProfile = await executeQuery(
-            `SELECT role, branch FROM profiles WHERE id = :id`,
+            `SELECT role, branch, full_name, department, job_title, manager_id FROM profiles WHERE id = :id`,
             { id: session.user.id },
             session.user.id
         )
-        const isSuperadmin = currentProfile[0]?.role === 'superadmin'
-        const isSecretary = currentProfile[0]?.role === 'secretary'
+        const currentRole = currentProfile[0]?.role || currentProfile[0]?.ROLE
+        const isSuperadmin = currentRole === 'superadmin'
+        const isSecretary = currentRole === 'secretary'
 
         const updates: string[] = []
         const params: any = { id: session.user.id }
@@ -99,6 +132,26 @@ export async function PUT(request: NextRequest) {
             params.department = department
         }
 
+        if (branch !== undefined) {
+            updates.push('branch = :branch')
+            params.branch = branch
+        }
+
+        if (job_title !== undefined) {
+            updates.push('job_title = :job_title')
+            params.job_title = job_title
+        }
+
+        if (phone !== undefined) {
+            updates.push('phone = :phone')
+            params.phone = phone
+        }
+
+        if (meeting_type !== undefined && (isSecretary || isSuperadmin)) {
+            updates.push('meeting_type = :meeting_type')
+            params.meeting_type = meeting_type
+        }
+
         if (zimbra_sync_enabled !== undefined) {
             updates.push('zimbra_sync_enabled = :zimbra_sync_enabled')
             params.zimbra_sync_enabled = zimbra_sync_enabled ? 1 : 0
@@ -109,23 +162,72 @@ export async function PUT(request: NextRequest) {
             params.telegram_user_id = telegram_user_id
         }
 
-        // Only superadmins can change roles and branches
+        // Only superadmins can change roles
         if (isSuperadmin) {
             if (role !== undefined) {
                 updates.push('role = :role')
                 params.role = role
             }
-
-            if (branch !== undefined) {
-                updates.push('branch = :branch')
-                params.branch = branch
-            }
-
-            if (meeting_type !== undefined) {
-                updates.push('meeting_type = :meeting_type')
-                params.meeting_type = meeting_type
-            }
         }
+
+        const hasManagerUpdate = manager_ids !== undefined
+        let sanitizedManagerIds: string[] = []
+        if (hasManagerUpdate) {
+            if (!Array.isArray(manager_ids)) {
+                return NextResponse.json({ error: 'manager_ids must be an array' }, { status: 400 })
+            }
+
+            const uniqueManagerIds = Array.from(
+                new Set(
+                    manager_ids
+                        .filter((value: any) => typeof value === 'string')
+                        .map((value: string) => value.trim())
+                        .filter((value: string) => value.length > 0)
+                )
+            )
+
+            sanitizedManagerIds = uniqueManagerIds.filter((managerId) => managerId !== session.user.id)
+
+            if (uniqueManagerIds.length !== sanitizedManagerIds.length) {
+                return NextResponse.json({ error: 'User cannot be their own manager' }, { status: 400 })
+            }
+
+            if (sanitizedManagerIds.length > 0) {
+                const placeholders = sanitizedManagerIds.map((_, index) => `:mid_${index}`).join(', ')
+                const verifyParams: Record<string, string> = {}
+                sanitizedManagerIds.forEach((managerId, index) => {
+                    verifyParams[`mid_${index}`] = managerId
+                })
+
+                const verifiedManagers = await executeQuery(
+                    `SELECT id FROM profiles WHERE id IN (${placeholders})`,
+                    verifyParams
+                )
+
+                if (verifiedManagers.length !== sanitizedManagerIds.length) {
+                    return NextResponse.json({ error: 'Some selected managers were not found' }, { status: 400 })
+                }
+            }
+
+            updates.push('manager_id = :manager_id')
+            params.manager_id = sanitizedManagerIds[0] || null
+        }
+
+        const nextFullName = full_name !== undefined ? full_name : currentProfile[0]?.full_name
+        const nextDepartment = department !== undefined ? department : currentProfile[0]?.department
+        const nextBranch = branch !== undefined ? branch : currentProfile[0]?.branch
+        const nextJobTitle = job_title !== undefined ? job_title : currentProfile[0]?.job_title
+        const currentManagerId = currentProfile[0]?.manager_id
+        const nextPrimaryManager = hasManagerUpdate ? (sanitizedManagerIds[0] || null) : currentManagerId
+        const profileComplete =
+            nextFullName &&
+            nextDepartment &&
+            nextBranch &&
+            nextJobTitle &&
+            nextPrimaryManager
+
+        updates.push('is_profile_complete = :is_profile_complete')
+        params.is_profile_complete = profileComplete ? 1 : 0
 
         if (updates.length === 0) {
             return NextResponse.json(
@@ -138,17 +240,62 @@ export async function PUT(request: NextRequest) {
 
         const sql = `UPDATE profiles SET ${updates.join(', ')} WHERE id = :id`
 
-        await executeNonQuery(sql, params, session.user.id)
+        await executeTransaction(async (connection: any) => {
+            await connection.execute(sql, params, { autoCommit: false })
+
+            if (hasManagerUpdate) {
+                await connection.execute(
+                    `DELETE FROM profile_managers WHERE profile_id = :profile_id`,
+                    { profile_id: session.user.id },
+                    { autoCommit: false }
+                )
+
+                for (let index = 0; index < sanitizedManagerIds.length; index++) {
+                    await connection.execute(
+                        `INSERT INTO profile_managers (profile_id, manager_id, is_primary, assigned_by)
+                         VALUES (:profile_id, :manager_id, :is_primary, :assigned_by)`,
+                        {
+                            profile_id: session.user.id,
+                            manager_id: sanitizedManagerIds[index],
+                            is_primary: index === 0 ? 1 : 0,
+                            assigned_by: session.user.id
+                        },
+                        { autoCommit: false }
+                    )
+                }
+            }
+        }, session.user.id)
 
         const profiles = await executeQuery(
-            `SELECT id, email, full_name, avatar_url, department, role, branch, meeting_type, telegram_user_id, zimbra_sync_enabled, zimbra_last_sync, created_at, updated_at
+            `SELECT id, email, full_name, avatar_url, department, role, branch, meeting_type, telegram_user_id,
+                    zimbra_sync_enabled, zimbra_last_sync, job_title, phone, manager_id, is_profile_complete,
+                    created_at, updated_at
              FROM profiles
              WHERE id = :id`,
             { id: session.user.id },
             session.user.id
         )
 
-        return NextResponse.json(profiles[0])
+        const managers = await executeQuery(
+            `SELECT pm.manager_id AS id,
+                    pm.is_primary,
+                    p.full_name,
+                    p.email,
+                    p.department,
+                    p.branch
+             FROM profile_managers pm
+             JOIN profiles p ON p.id = pm.manager_id
+             WHERE pm.profile_id = :profile_id
+             ORDER BY pm.is_primary DESC, p.full_name ASC`,
+            { profile_id: session.user.id },
+            session.user.id
+        )
+
+        return NextResponse.json({
+            ...profiles[0],
+            manager_ids: managers.map((m: any) => m.id),
+            managers
+        })
     } catch (error: any) {
         console.error('PUT /api/profiles/me error:', error)
         try {

@@ -62,7 +62,7 @@ export async function PUT(
             )
         }
 
-        const rowsAffected = await executeNonQuery(
+        const result = await executeNonQuery(
             `UPDATE folders 
              SET title = :title, updated_at = SYSTIMESTAMP
              WHERE id = :id`,
@@ -70,7 +70,7 @@ export async function PUT(
             session.user.id
         )
 
-        if (rowsAffected === 0) {
+        if (!result?.rowsAffected) {
             return NextResponse.json(
                 { error: 'Folder not found or unauthorized' },
                 { status: 404 }
@@ -106,53 +106,58 @@ export async function DELETE(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Check user role for admin permissions
-        const userProfile = await executeQuery<{ role: string }>(
-            `SELECT role FROM profiles WHERE id = :id`,
-            { id: session.user.id }
+        const folderRows = await executeQuery(
+            `SELECT id, parent_id FROM folders WHERE id = :id`,
+            { id: resolvedParams.id },
+            session.user.id
         )
-        const role = userProfile.length > 0 ? userProfile[0].role : 'user'
-        const isAdmin = role === 'admin' || role === 'superadmin'
 
-        // VPD (Virtual Private Database) Bypass for Admins:
-        // - When vpdUserId is undefined, the Oracle VPD context is not set
-        // - This allows admins to bypass row-level security and delete folders created by others
-        // - Standard users must be the folder owner or have explicit permissions
-        const vpdUserId = isAdmin ? undefined : session.user.id
+        if (folderRows.length === 0) {
+            return NextResponse.json({ error: 'Folder not found' }, { status: 404 })
+        }
+
+        const roleRows = await executeQuery(
+            `SELECT role FROM profiles WHERE id = :id`,
+            { id: session.user.id },
+            session.user.id
+        )
+
+        const role = roleRows[0]?.role || roleRows[0]?.ROLE
+        const isAdmin = role === 'admin' || role === 'superadmin'
+        const parentId = folderRows[0]?.parent_id || folderRows[0]?.PARENT_ID
+
+        if (!parentId && !isAdmin) {
+            return NextResponse.json(
+                { error: 'Sadece admin/superadmin departman silebilir.' },
+                { status: 403 }
+            )
+        }
 
         // Cascade delete - önce ilişkili kayıtları sil
         await executeNonQuery(
             `DELETE FROM folder_members WHERE folder_id = :id`,
             { id: resolvedParams.id },
-            vpdUserId
+            session.user.id
         )
 
         // Delete lists within folder
         await executeNonQuery(
             `DELETE FROM lists WHERE folder_id = :id`,
             { id: resolvedParams.id },
-            vpdUserId
+            session.user.id
         )
 
-        const rowsAffected = await executeNonQuery(
+        const result = await executeNonQuery(
             `DELETE FROM folders WHERE id = :id`,
             { id: resolvedParams.id },
-            vpdUserId
+            session.user.id
         )
 
-        if (rowsAffected === 0) {
-            // Check if folder existed but user had no permission (only if not admin)
-            if (!isAdmin) {
-                 return NextResponse.json(
-                    { error: 'Folder not found or unauthorized' },
-                    { status: 404 }
-                 )
-            }
-            // If admin and 0 rows, it simply didn't exist
-             return NextResponse.json(
-                { error: 'Folder not found' },
+        if (!result?.rowsAffected) {
+            return NextResponse.json(
+                { error: 'Folder not found or unauthorized' },
                 { status: 404 }
-             )
+            )
         }
 
         return NextResponse.json({ success: true })
