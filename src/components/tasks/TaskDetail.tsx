@@ -31,6 +31,7 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
     
     // User Search State
     const [userSearchQuery, setUserSearchQuery] = useState('')
+    const [allSearchableUsers, setAllSearchableUsers] = useState<Profile[]>([])
     const [foundUsers, setFoundUsers] = useState<Profile[]>([])
     const [isSearchingUser, setIsSearchingUser] = useState(false)
 
@@ -50,6 +51,7 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
                             }
                             return n as Profile
                         })
+                        setAllSearchableUsers(normalized)
                         setFoundUsers(normalized)
                     }
                 } finally {
@@ -59,6 +61,23 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
             fetchAllUsers()
         }
     }, [profile?.role])
+
+    useEffect(() => {
+        if (profile?.role !== 'user') {
+            const query = userSearchQuery.trim().toLowerCase()
+            if (query.length < 2) {
+                setFoundUsers(allSearchableUsers)
+                return
+            }
+
+            setFoundUsers(
+                allSearchableUsers.filter((u) =>
+                    (u.full_name || '').toLowerCase().includes(query) ||
+                    (u.email || '').toLowerCase().includes(query)
+                )
+            )
+        }
+    }, [allSearchableUsers, userSearchQuery, profile?.role])
 
     // Regular users still use search
     useEffect(() => {
@@ -139,7 +158,8 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
         isSameBranchSecretary ||  // NEW: Secretary in same branch can assign
         currentMembership?.can_assign_task || 
         isTaskCreator || 
-        currentMembership?.can_add_task
+        currentMembership?.can_add_task ||
+        currentMembership?.can_delete_task
 
     // İlerleme Hesaplama
     const totalAssignees = task?.task_assignees?.length || 0
@@ -237,7 +257,7 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
                 animate={{ x: 0 }}
                 exit={{ x: '100%' }}
                 transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                className="fixed md:relative top-0 right-0 w-full md:w-[450px] h-full bg-card/95 backdrop-blur-xl border-l shadow-2xl z-50 md:z-auto flex flex-col shrink-0"
+                className="fixed md:relative top-0 right-0 w-full md:w-[450px] h-full bg-card/85 backdrop-blur-2xl border-l shadow-2xl z-50 md:z-auto flex flex-col shrink-0"
             >
                 <header className="p-5 border-b flex items-center justify-between bg-card/50 shrink-0">
                     <div className="flex flex-col">
@@ -478,7 +498,6 @@ export default function TaskDetail({ task: initialTask, onClose }: TaskDetailPro
                                                                                     showToast(`${u.full_name} atandı`, 'success')
                                                                                 }
                                                                                 setUserSearchQuery('')
-                                                                                setFoundUsers([])
                                                                             }
                                                                         }}
                                                                         className={clsx(

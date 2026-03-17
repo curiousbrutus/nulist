@@ -12,12 +12,40 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
+        const roleRows = await executeQuery(
+            `SELECT role FROM profiles WHERE id = :id`,
+            { id: session.user.id },
+            session.user.id
+        )
+        const role = String(roleRows[0]?.role || roleRows[0]?.ROLE || '')
+
         const folders = await executeQuery(
             `SELECT f.id, f.title, f.user_id, f.parent_id, f.created_at,
                     (SELECT COUNT(*) FROM folder_members fm WHERE fm.folder_id = f.id) as member_count
              FROM folders f
+             LEFT JOIN folders pf ON pf.id = f.parent_id
+             WHERE (
+                :is_privileged = 1
+                OR f.user_id = :user_id
+                OR f.id IN (SELECT folder_id FROM folder_members WHERE user_id = :user_id)
+                OR EXISTS (
+                    SELECT 1
+                    FROM user_departments ud
+                    JOIN departments d ON d.id = ud.department_id
+                    JOIN facilities fac ON fac.id = d.facility_id
+                    WHERE ud.user_id = :user_id
+                      AND (
+                        UPPER(TRIM(f.title)) = UPPER(TRIM(d.name))
+                        OR UPPER(TRIM(NVL(pf.title, ''))) = UPPER(TRIM(d.name))
+                      )
+                      AND UPPER(TRIM(NVL(pf.title, f.title))) = UPPER(TRIM(fac.name))
+                )
+             )
              ORDER BY f.created_at DESC`,
-            {},
+            {
+                user_id: session.user.id,
+                is_privileged: (role === 'admin' || role === 'superadmin') ? 1 : 0
+            },
             session.user.id
         )
 

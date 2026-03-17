@@ -15,16 +15,48 @@ export async function GET(request: NextRequest) {
         const { searchParams } = new URL(request.url)
         const folderId = searchParams.get('folder_id')
 
+        const roleRows = await executeQuery(
+            `SELECT role FROM profiles WHERE id = :id`,
+            { id: session.user.id },
+            session.user.id
+        )
+        const role = String(roleRows[0]?.role || roleRows[0]?.ROLE || '')
+
         let sql = `
             SELECT l.id, l.title, l.folder_id, l.created_at, l.updated_at,
                    (SELECT COUNT(*) FROM tasks t WHERE t.list_id = l.id) as task_count
             FROM lists l
+            JOIN folders f ON f.id = l.folder_id
+            LEFT JOIN folders pf ON pf.id = f.parent_id
         `
 
-        const params: any = {}
+        const params: any = {
+            user_id: session.user.id,
+            is_privileged: (role === 'admin' || role === 'superadmin') ? 1 : 0
+        }
+
+        sql += `
+            WHERE (
+                :is_privileged = 1
+                OR f.user_id = :user_id
+                OR l.folder_id IN (SELECT folder_id FROM folder_members WHERE user_id = :user_id)
+                OR EXISTS (
+                    SELECT 1
+                    FROM user_departments ud
+                    JOIN departments d ON d.id = ud.department_id
+                    JOIN facilities fac ON fac.id = d.facility_id
+                    WHERE ud.user_id = :user_id
+                      AND (
+                        UPPER(TRIM(f.title)) = UPPER(TRIM(d.name))
+                        OR UPPER(TRIM(NVL(pf.title, ''))) = UPPER(TRIM(d.name))
+                      )
+                      AND UPPER(TRIM(NVL(pf.title, f.title))) = UPPER(TRIM(fac.name))
+                )
+            )
+        `
 
         if (folderId) {
-            sql += ' WHERE l.folder_id = :folder_id'
+            sql += ' AND l.folder_id = :folder_id'
             params.folder_id = folderId
         }
 

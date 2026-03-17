@@ -17,26 +17,28 @@ const makeRequest = (body: any) => {
 }
 
 describe('POST /api/ai/chat', () => {
-  it('returns 503 when API key missing', async () => {
+  it('returns 503 when Ollama is unreachable', async () => {
     authMock.mockResolvedValue({ user: { id: 'u1' } })
-    const original = process.env.OPENROUTER_API_KEY
-    process.env.OPENROUTER_API_KEY = ''
+    executeQueryMock.mockResolvedValue([])
+
+    const fetchMock = vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED'))
+    vi.stubGlobal('fetch', fetchMock)
 
     const { POST } = await import('@/app/api/ai/chat/route')
     const res = await POST(makeRequest({ message: 'test' }))
 
     expect(res.status).toBe(503)
-    process.env.OPENROUTER_API_KEY = original
   })
 
-  it('returns AI message when OpenRouter responds', async () => {
+  it('returns AI message when Ollama responds', async () => {
     authMock.mockResolvedValue({ user: { id: 'u1' } })
     executeQueryMock.mockResolvedValue([])
 
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
-        choices: [{ message: { content: 'Merhaba' } }]
+        message: { content: 'Merhaba' },
+        model: 'qwen2.5:3b'
       })
     })
     vi.stubGlobal('fetch', fetchMock)

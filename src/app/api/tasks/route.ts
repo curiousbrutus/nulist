@@ -53,6 +53,7 @@ function normalizeRecurrenceIntervalDays(interval: any): number | null {
 
 // GET /api/tasks - Tasks listele (sadece kullanıcının görebildiği görevler)
 export async function GET(request: NextRequest) {
+    console.log(`[DEBUG] GET /api/tasks triggered at ${new Date().toISOString()}`)
     try {
         const session = await auth()
         if (!session?.user) {
@@ -62,30 +63,49 @@ export async function GET(request: NextRequest) {
         const { searchParams } = new URL(request.url)
         const listId = searchParams.get('list_id')
 
-        // Kullanıcının görebileceği görevler:
-        // 1. Kendisine atanan görevler (task_assignees üzerinden)
-        // 2. Kendi oluşturduğu görevler (created_by)
-        // 3. Üyesi olduğu folder'lardaki görevler (folder_members üzerinden)
-        // 4. Sahip olduğu folder'lardaki görevler (folders.user_id)
+        const roleRows = await executeQuery(
+            `SELECT role FROM profiles WHERE id = :id`,
+            { id: session.user.id },
+            session.user.id
+        )
+        const role = String(roleRows[0]?.role || roleRows[0]?.ROLE || '')
+
         let sql = `
             SELECT t.*,
                    (SELECT COUNT(*) FROM task_assignees ta WHERE ta.task_id = t.id) as assignee_count,
                    (SELECT COUNT(*) FROM comments c WHERE c.task_id = t.id) as comment_count
             FROM tasks t
             JOIN lists l ON t.list_id = l.id
-            WHERE (
-                -- Kendisine atanan görevler
-                t.id IN (SELECT task_id FROM task_assignees WHERE user_id = :user_id)
-                -- Kendi oluşturduğu görevler
-                OR t.created_by = :user_id
-                -- Üyesi olduğu folder'lardaki görevler
-                OR l.folder_id IN (SELECT folder_id FROM folder_members WHERE user_id = :user_id)
-                -- Sahip olduğu folder'lardaki görevler
-                OR l.folder_id IN (SELECT id FROM folders WHERE user_id = :user_id)
-            )
+            JOIN folders f ON l.folder_id = f.id
+            LEFT JOIN folders pf ON pf.id = f.parent_id
+            WHERE 1=1
         `
 
-        const params: any = { user_id: session.user.id }
+        const params: any = {}
+
+        if (role !== 'admin' && role !== 'superadmin') {
+            params.user_id = session.user.id
+            sql += `
+                AND (
+                    t.id IN (SELECT task_id FROM task_assignees WHERE user_id = :user_id)
+                    OR t.created_by = :user_id
+                    OR f.user_id = :user_id
+                    OR l.folder_id IN (SELECT folder_id FROM folder_members WHERE user_id = :user_id)
+                    OR EXISTS (
+                        SELECT 1
+                        FROM user_departments ud
+                        JOIN departments d ON d.id = ud.department_id
+                        JOIN facilities fac ON fac.id = d.facility_id
+                        WHERE ud.user_id = :user_id
+                          AND (
+                            UPPER(TRIM(f.title)) = UPPER(TRIM(d.name))
+                            OR UPPER(TRIM(NVL(pf.title, ''))) = UPPER(TRIM(d.name))
+                          )
+                          AND UPPER(TRIM(NVL(pf.title, f.title))) = UPPER(TRIM(fac.name))
+                    )
+                )
+            `
+        }
 
         if (listId) {
             sql += ' AND t.list_id = :list_id'
@@ -140,6 +160,51 @@ export async function POST(request: NextRequest) {
                 { error: 'list_id is required' },
                 { status: 400 }
             )
+        }
+
+        const roleRows = await executeQuery(
+            `SELECT role FROM profiles WHERE id = :id`,
+            { id: session.user.id },
+            session.user.id
+        )
+        const role = String(roleRows[0]?.role || roleRows[0]?.ROLE || '')
+
+        const accessRows = await executeQuery(
+            `SELECT l.id
+             FROM lists l
+             JOIN folders f ON l.folder_id = f.id
+             LEFT JOIN folders pf ON pf.id = f.parent_id
+             LEFT JOIN folder_members fm ON fm.folder_id = f.id AND fm.user_id = :user_id
+             WHERE l.id = :list_id
+               AND (
+                    :is_privileged = 1
+                    OR f.user_id = :user_id
+                    OR NVL(fm.can_add_task, 0) = 1
+                    OR NVL(fm.can_assign_task, 0) = 1
+                    OR NVL(fm.can_delete_task, 0) = 1
+                    OR EXISTS (
+                        SELECT 1
+                        FROM user_departments ud
+                        JOIN departments d ON d.id = ud.department_id
+                        JOIN facilities fac ON fac.id = d.facility_id
+                        WHERE ud.user_id = :user_id
+                          AND (
+                            UPPER(TRIM(f.title)) = UPPER(TRIM(d.name))
+                            OR UPPER(TRIM(NVL(pf.title, ''))) = UPPER(TRIM(d.name))
+                          )
+                          AND UPPER(TRIM(NVL(pf.title, f.title))) = UPPER(TRIM(fac.name))
+                    )
+               )`,
+            {
+                user_id: session.user.id,
+                list_id,
+                is_privileged: (role === 'admin' || role === 'superadmin') ? 1 : 0
+            },
+            session.user.id
+        )
+
+        if (!accessRows || accessRows.length === 0) {
+            return NextResponse.json({ error: 'Bu listeye görev ekleme yetkiniz yok' }, { status: 403 })
         }
 
         const newId = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`

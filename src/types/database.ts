@@ -11,6 +11,21 @@ export interface Profile {
     job_title?: string;
     phone?: string;
     manager_id?: string;
+    primary_facility_id?: string;
+    facility_ids?: string[];
+    department_ids?: string[];
+    facilities?: Array<{
+        id: string;
+        name?: string;
+        is_primary?: number;
+    }>;
+    departments?: Array<{
+        id: string;
+        name?: string;
+        facility_id?: string;
+        facility_name?: string;
+        is_primary?: number;
+    }>;
     manager_ids?: string[];
     managers?: Array<{
         id: string;

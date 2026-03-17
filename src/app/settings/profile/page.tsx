@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useAuthStore } from '@/store/useAuthStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,6 +10,24 @@ import { useToast } from '@/components/ui/toast'
 import { ArrowLeft, Save } from 'lucide-react'
 import { InitialsAvatar } from '@/components/ui/InitialsAvatar'
 import { QRCodeSVG } from 'qrcode.react'
+
+interface FacilityOption {
+    id: string
+    name: string
+}
+
+interface DepartmentOption {
+    id: string
+    name: string
+    facility_id: string
+    facility_name?: string
+}
+
+const FALLBACK_BRANCHES: FacilityOption[] = [
+    { id: 'fallback-corlu', name: 'Çorlu' },
+    { id: 'fallback-kapakli', name: 'Kapaklı' },
+    { id: 'fallback-cerkezkoy', name: 'Çerkezköy' }
+]
 
 export default function ProfilePage() {
     const { user, profile, setProfile } = useAuthStore()
@@ -19,6 +38,10 @@ export default function ProfilePage() {
     const [role, setRole] = useState(profile?.role || 'user')
     const [branch, setBranch] = useState(profile?.branch || '')
     const [meetingType, setMeetingType] = useState(profile?.meeting_type || '')
+    const [facilities, setFacilities] = useState<FacilityOption[]>([])
+    const [departments, setDepartments] = useState<DepartmentOption[]>([])
+    const [selectedFacilityIds, setSelectedFacilityIds] = useState<string[]>([])
+    const [selectedDepartmentIds, setSelectedDepartmentIds] = useState<string[]>([])
     const [managerCandidates, setManagerCandidates] = useState<any[]>([])
     const [selectedManagerIds, setSelectedManagerIds] = useState<string[]>([])
     const [candidateToAdd, setCandidateToAdd] = useState('')
@@ -27,19 +50,59 @@ export default function ProfilePage() {
     const router = useRouter()
 
     useEffect(() => {
-        const loadManagerCandidates = async () => {
+        const loadInitialData = async () => {
             try {
-                const res = await fetch('/api/profiles/managers')
-                if (res.ok) {
-                    const data = await res.json()
-                    setManagerCandidates(Array.isArray(data) ? data : [])
+                const [managerRes, facilitiesRes, departmentsRes, assignmentsRes] = await Promise.all([
+                    fetch('/api/profiles/managers'),
+                    fetch('/api/org/facilities'),
+                    fetch('/api/org/departments'),
+                    fetch('/api/org/assignments')
+                ])
+
+                if (managerRes.ok) {
+                    const managerData = await managerRes.json()
+                    setManagerCandidates(Array.isArray(managerData) ? managerData : [])
+                }
+
+                if (facilitiesRes.ok) {
+                    const facilityData = await facilitiesRes.json()
+                    const normalizedFacilities = Array.isArray(facilityData)
+                        ? facilityData
+                            .map((item: any) => ({
+                                id: item.id || item.ID,
+                                name: item.name || item.NAME
+                            }))
+                            .filter((item: FacilityOption) => Boolean(item.id && item.name))
+                        : []
+                    setFacilities(normalizedFacilities)
+                }
+
+                if (departmentsRes.ok) {
+                    const departmentData = await departmentsRes.json()
+                    const normalizedDepartments = Array.isArray(departmentData)
+                        ? departmentData
+                            .map((item: any) => ({
+                                id: item.id || item.ID,
+                                name: item.name || item.NAME,
+                                facility_id: item.facility_id || item.FACILITY_ID,
+                                facility_name: item.facility_name || item.FACILITY_NAME
+                            }))
+                            .filter((item: DepartmentOption) => Boolean(item.id && item.name && item.facility_id))
+                        : []
+                    setDepartments(normalizedDepartments)
+                }
+
+                if (assignmentsRes.ok) {
+                    const assignmentData = await assignmentsRes.json()
+                    setSelectedFacilityIds(Array.isArray(assignmentData?.facility_ids) ? assignmentData.facility_ids : [])
+                    setSelectedDepartmentIds(Array.isArray(assignmentData?.department_ids) ? assignmentData.department_ids : [])
                 }
             } catch {
-                // Silent fail, page still works without manager suggestions
+                // Silent fail, page still works with fallback options
             }
         }
 
-        loadManagerCandidates()
+        loadInitialData()
     }, [])
 
     useEffect(() => {
@@ -75,6 +138,9 @@ export default function ProfilePage() {
 
     const selectedManagers = managerCandidates.filter((candidate) => selectedManagerIds.includes(candidate.id))
     const availableManagers = managerCandidates.filter((candidate) => !selectedManagerIds.includes(candidate.id))
+    const facilityOptions = facilities.length > 0 ? facilities : FALLBACK_BRANCHES
+    const selectedFacilities = facilityOptions.filter((facility) => selectedFacilityIds.includes(facility.id))
+    const selectedDepartments = departments.filter((departmentOption) => selectedDepartmentIds.includes(departmentOption.id))
 
     const handleUpdate = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -110,6 +176,8 @@ export default function ProfilePage() {
                     phone: phone,
                     role: role as any,
                     branch: branch,
+                    facility_ids: selectedFacilityIds,
+                    department_ids: selectedDepartmentIds,
                     meeting_type: meetingType,
                     manager_ids: selectedManagerIds,
                     manager_id: selectedManagerIds[0]
@@ -188,17 +256,45 @@ export default function ProfilePage() {
 
                         <div className="space-y-2">
                             <label className="text-sm font-medium">Hastane Şubesi</label>
-                            <select
-                                value={branch}
-                                onChange={(e) => setBranch(e.target.value)}
-                                className="w-full px-3 py-2 border rounded-md bg-background"
-                            >
-                                <option value="">Şube Seçin</option>
-                                <option value="Tüm Şubeler">Tüm Şubeler</option>
-                                <option value="Çorlu">Çorlu</option>
-                                <option value="Kapaklı">Kapaklı</option>
-                                <option value="Çerkezköy">Çerkezköy</option>
-                            </select>
+                            <Input value={branch || 'Atama ile belirleniyor'} disabled className="bg-muted opacity-70" />
+                        </div>
+
+                        <div className="space-y-3">
+                            <div className="rounded-lg border p-3 bg-muted/20 space-y-3">
+                                <div>
+                                    <p className="text-sm font-medium">Bağlı Şubeler</p>
+                                    {selectedFacilities.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1 mt-2">
+                                            {selectedFacilities.map((facility) => (
+                                                <span key={facility.id} className="text-xs px-2 py-1 rounded-full bg-muted border">
+                                                    {facility.name}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-muted-foreground mt-1">Atama bulunamadı.</p>
+                                    )}
+                                </div>
+
+                                <div>
+                                    <p className="text-sm font-medium">Bağlı Departmanlar</p>
+                                    {selectedDepartments.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1 mt-2">
+                                            {selectedDepartments.map((departmentOption) => (
+                                                <span key={departmentOption.id} className="text-xs px-2 py-1 rounded-full bg-muted border">
+                                                    {departmentOption.name}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-muted-foreground mt-1">Atama bulunamadı.</p>
+                                    )}
+                                </div>
+
+                                <Link href="/settings/sync" className="inline-flex">
+                                    <Button type="button" variant="outline" size="sm">Birim Yönetimine Git</Button>
+                                </Link>
+                            </div>
                         </div>
 
                         <div className="space-y-3">

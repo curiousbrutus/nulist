@@ -119,7 +119,7 @@ export default function AIAssistant({ listId }: AIAssistantProps) {
                     </div>
                     <div>
                         <h3 className="font-semibold text-sm">AI Asistan</h3>
-                        <p className="text-xs text-muted-foreground">128K context • OCR • Charts</p>
+                        <p className="text-xs text-muted-foreground">Local Ollama • Qwen</p>
                     </div>
                 </div>
                 <Button
@@ -138,8 +138,8 @@ export default function AIAssistant({ listId }: AIAssistantProps) {
                     <div className="text-center py-12 space-y-3">
                         <div className="text-4xl">🚀</div>
                         <p className="text-sm text-muted-foreground">
-                            NVIDIA Nemotron 2 VL - 128K context!<br/>
-                            Görevlerinizi analiz eder, belgelerinizi okur, grafiklerinizi yorumlarım!
+                            Local Qwen modeli ile çalışıyorum.<br/>
+                            Görevlerinizi analiz eder ve hızlı öneriler sunarım.
                         </p>
                         <div className="text-xs text-muted-foreground bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 mx-4">
                             <strong>Not:</strong> Sadece görüntüleme ve analiz yapabilirim. Görev değiştirme yetkim yok.
@@ -287,7 +287,7 @@ export default function AIAssistant({ listId }: AIAssistantProps) {
                     </Button>
                 </div>
                 <p className="text-[10px] text-muted-foreground mt-2 text-center">
-                    🚀 NVIDIA Nemotron 2 VL - OCR, Chart & Doc Analysis
+                    ⚡ Local Ollama Qwen - Hızlı görev analizi
                 </p>
             </div>
         </div>

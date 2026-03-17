@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import { LayoutGrid, List as ListIcon, Menu } from 'lucide-react'
+import { LayoutGrid, List as ListIcon, Menu, ChevronDown, ChevronRight } from 'lucide-react'
 import { useAuthStore } from '@/store/useAuthStore'
 import { useTaskStore } from '@/store/useTaskStore'
 import Sidebar from '@/components/layout/Sidebar'
@@ -22,6 +22,8 @@ export default function HomePage() {
   const [isFocusMode, setIsFocusMode] = useState(false)
   const [isMyTasksMode, setIsMyTasksMode] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [isActiveSectionOpen, setIsActiveSectionOpen] = useState(true)
+  const [isCompletedSectionOpen, setIsCompletedSectionOpen] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -65,6 +67,25 @@ export default function HomePage() {
     ? selectedListId.replace('folder-', '')
     : null
   const selectedFolder = selectedFolderId ? folders.find(f => f.id === selectedFolderId) : null
+  const isPrivilegedRole = profile?.role === 'admin' || profile?.role === 'superadmin'
+
+  const getDescendantFolderIds = (rootId: string): string[] => {
+    const result = new Set<string>([rootId])
+    const queue: string[] = [rootId]
+
+    while (queue.length > 0) {
+      const currentId = queue.shift()!
+      const children = folders.filter(folder => folder.parent_id === currentId)
+
+      for (const child of children) {
+        if (result.has(child.id)) continue
+        result.add(child.id)
+        queue.push(child.id)
+      }
+    }
+
+    return Array.from(result)
+  }
 
   // Filter logic
   let filteredTasks = tasks
@@ -78,8 +99,11 @@ export default function HomePage() {
       t.task_assignees?.some(ta => ta.user_id === user.id)
     )
   } else if (selectedFolderId) {
-    // Departman seçiliyse: O folder'a ait tüm listelerin görevlerini getir
-    const folderListIds = lists.filter(l => l.folder_id === selectedFolderId).map(l => l.id)
+    // Klasör seçiliyse: Alt departmanlar dahil tüm listelerin görevlerini getir
+    const descendantFolderIds = getDescendantFolderIds(selectedFolderId)
+    const folderListIds = lists
+      .filter(l => descendantFolderIds.includes(l.folder_id))
+      .map(l => l.id)
     filteredTasks = tasks.filter(t => folderListIds.includes(t.list_id))
   } else if (selectedListId) {
     // Liste seçiliyse: Sadece o listenin görevlerini getir
@@ -97,6 +121,22 @@ export default function HomePage() {
 
   const activeTasks = filteredTasks.filter(t => !t.is_completed)
   const completedTasks = filteredTasks.filter(t => t.is_completed)
+
+  const now = Date.now()
+  const dayMs = 1000 * 60 * 60 * 24
+  const dueActiveTasks = activeTasks
+    .filter((task) => Boolean(task.due_date))
+    .map((task) => {
+      const dueDate = new Date(task.due_date as string)
+      const diffDays = Math.ceil((dueDate.getTime() - now) / dayMs)
+      return { task, diffDays, dueDate }
+    })
+    .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
+
+  const overdueCount = dueActiveTasks.filter((item) => item.diffDays < 0).length
+  const urgentCount = dueActiveTasks.filter((item) => item.diffDays >= 0 && item.diffDays <= 1).length
+  const upcomingCount = dueActiveTasks.filter((item) => item.diffDays >= 2 && item.diffDays <= 3).length
+  const topDueTasks = dueActiveTasks.slice(0, 5)
 
   return (
     <div className="flex h-screen bg-background text-foreground overflow-hidden">
@@ -157,6 +197,26 @@ export default function HomePage() {
           <div className="max-w-4xl mx-auto h-full overflow-visible">
             {viewMode === 'list' ? (
               <div className="space-y-8">
+                {!isFocusMode && !isMyTasksMode && !searchQuery.trim() && topDueTasks.length > 0 && (
+                  <section className="border rounded-xl bg-card p-4 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                      <span className="px-2 py-1 rounded-full bg-red-100 text-red-700">Geciken: {overdueCount}</span>
+                      <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-700">Acil (0-1 gün): {urgentCount}</span>
+                      <span className="px-2 py-1 rounded-full bg-blue-100 text-blue-700">Yaklaşan (2-3 gün): {upcomingCount}</span>
+                    </div>
+                    <div className="space-y-2">
+                      {topDueTasks.map(({ task, diffDays }) => (
+                        <div key={`due-${task.id}`} className="flex items-center justify-between text-sm border rounded-lg px-3 py-2 bg-background/60">
+                          <span className="truncate pr-2">{task.title}</span>
+                          <span className={diffDays < 0 ? 'text-red-600 font-semibold' : diffDays <= 1 ? 'text-amber-600 font-semibold' : 'text-blue-600 font-semibold'}>
+                            {diffDays < 0 ? `${Math.abs(diffDays)} gün gecikti` : diffDays === 0 ? 'Bugün' : `${diffDays} gün kaldı`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
                 {/* Dynamic Task Input Logic */}
                 {(() => {
                   if (isFocusMode || isMyTasksMode) return null
@@ -169,7 +229,7 @@ export default function HomePage() {
                       const folder = folders.find(f => f.id === list.folder_id)
                       const isOwner = folder?.user_id === user.id
                       const membership = folderMembers.find(m => m.folder_id === folder?.id && m.user_id === user.id)
-                      const canAddTask = isOwner || membership?.can_add_task
+                      const canAddTask = isPrivilegedRole || isOwner || membership?.can_add_task
 
                       // Simply don't show input if no permission (no error message)
                       if (!canAddTask) return null
@@ -179,7 +239,8 @@ export default function HomePage() {
 
                   // Case 2: Folder/Department Selected
                   if (selectedFolderId) {
-                      const firstList = lists.find(l => l.folder_id === selectedFolderId)
+                      const descendantFolderIds = getDescendantFolderIds(selectedFolderId)
+                      const firstList = lists.find(l => descendantFolderIds.includes(l.folder_id))
                       
                       if (!firstList) {
                          return (
@@ -193,7 +254,7 @@ export default function HomePage() {
                       const folder = folders.find(f => f.id === selectedFolderId)
                       const isOwner = folder?.user_id === user.id
                       const membership = folderMembers.find(m => m.folder_id === folder?.id && m.user_id === user.id)
-                      const canAddTask = isOwner || membership?.can_add_task
+                      const canAddTask = isPrivilegedRole || isOwner || membership?.can_add_task
 
                       // Simply don't show input if no permission (no error message)
                       if (!canAddTask) return null
@@ -210,19 +271,44 @@ export default function HomePage() {
                   )
                 })()}
 
-                <div className="space-y-2">
-                  {activeTasks.map((task, index) => (
-                    <TaskItem key={task.id || `active-${index}`} task={task} />
-                  ))}
-                </div>
+                <section className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsActiveSectionOpen(prev => !prev)}
+                    className="w-full flex items-center justify-between rounded-lg px-2 py-1.5 text-left hover:bg-muted/40 transition-colors"
+                  >
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase">Devam Edenler ({activeTasks.length})</h3>
+                    {isActiveSectionOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                  </button>
+
+                  {isActiveSectionOpen && (
+                    <div className="space-y-2">
+                      {activeTasks.map((task, index) => (
+                        <TaskItem key={task.id || `active-${index}`} task={task} />
+                      ))}
+                    </div>
+                  )}
+                </section>
 
                 {completedTasks.length > 0 && !isFocusMode && (
-                  <div className="space-y-2 pt-4">
-                    <h3 className="text-xs font-semibold text-muted-foreground uppercase px-1">Tamamlananlar</h3>
-                    {completedTasks.map((task, index) => (
-                      <TaskItem key={task.id || `completed-${index}`} task={task} />
-                    ))}
-                  </div>
+                  <section className="space-y-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsCompletedSectionOpen(prev => !prev)}
+                      className="w-full flex items-center justify-between rounded-lg px-2 py-1.5 text-left hover:bg-muted/40 transition-colors"
+                    >
+                      <h3 className="text-xs font-semibold text-muted-foreground uppercase">Tamamlananlar ({completedTasks.length})</h3>
+                      {isCompletedSectionOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                    </button>
+
+                    {isCompletedSectionOpen && (
+                      <div className="space-y-2">
+                        {completedTasks.map((task, index) => (
+                          <TaskItem key={task.id || `completed-${index}`} task={task} />
+                        ))}
+                      </div>
+                    )}
+                  </section>
                 )}
               </div>
             ) : (

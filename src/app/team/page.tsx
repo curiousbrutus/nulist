@@ -25,7 +25,18 @@ interface TeamResponse {
     filterOptions?: {
         departments: string[];
         units: Array<{ name: string; department: string }>;
+        meetingTypes?: Array<{ name: string; total_tasks: number; completed_tasks: number; ratio: number }>;
     };
+}
+
+interface MemberTask {
+    id: string;
+    title: string;
+    is_completed: boolean;
+    due_date?: string;
+    meeting_type?: string;
+    list_title?: string;
+    folder_title?: string;
 }
 
 export default function TeamPage() {
@@ -33,8 +44,13 @@ export default function TeamPage() {
     const [stats, setStats] = useState<TeamMember[]>([])
     const [departments, setDepartments] = useState<string[]>([])
     const [units, setUnits] = useState<Array<{ name: string; department: string }>>([])
+    const [meetingTypes, setMeetingTypes] = useState<Array<{ name: string; total_tasks: number; completed_tasks: number; ratio: number }>>([])
+    const [selectedMeetingType, setSelectedMeetingType] = useState('')
     const [selectedDepartment, setSelectedDepartment] = useState('')
     const [selectedUnit, setSelectedUnit] = useState('')
+    const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null)
+    const [memberTasks, setMemberTasks] = useState<MemberTask[]>([])
+    const [loadingMemberTasks, setLoadingMemberTasks] = useState(false)
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
@@ -43,6 +59,7 @@ export default function TeamPage() {
                 const params = new URLSearchParams()
                 if (selectedDepartment) params.set('department', selectedDepartment)
                 if (selectedUnit) params.set('unit', selectedUnit)
+                if (selectedMeetingType) params.set('meeting_type', selectedMeetingType)
                 const endpoint = params.toString() ? `/api/stats/team?${params.toString()}` : '/api/stats/team'
                 const res = await fetch(endpoint)
                 if (res.ok) {
@@ -51,10 +68,12 @@ export default function TeamPage() {
                         setStats(data)
                         setDepartments([])
                         setUnits([])
+                        setMeetingTypes([])
                     } else {
                         setStats(data.stats || [])
                         setDepartments(data.filterOptions?.departments || [])
                         setUnits(data.filterOptions?.units || [])
+                        setMeetingTypes(data.filterOptions?.meetingTypes || [])
                     }
                 }
             } catch (error) {
@@ -65,7 +84,7 @@ export default function TeamPage() {
         }
 
         fetchStats()
-    }, [selectedDepartment, selectedUnit])
+    }, [selectedDepartment, selectedUnit, selectedMeetingType])
 
     useEffect(() => {
         if (selectedDepartment && selectedUnit) {
@@ -79,6 +98,28 @@ export default function TeamPage() {
     const filteredUnits = selectedDepartment
         ? units.filter((unit) => unit.department === selectedDepartment)
         : units
+
+    const loadMemberTasks = async (member: TeamMember) => {
+        setSelectedMember(member)
+        setLoadingMemberTasks(true)
+        try {
+            const params = new URLSearchParams({ user_id: member.id })
+            if (selectedMeetingType) {
+                params.set('meeting_type', selectedMeetingType)
+            }
+            const res = await fetch(`/api/stats/team/member?${params.toString()}`)
+            if (res.ok) {
+                const data = await res.json()
+                setMemberTasks(Array.isArray(data.tasks) ? data.tasks : [])
+            } else {
+                setMemberTasks([])
+            }
+        } catch {
+            setMemberTasks([])
+        } finally {
+            setLoadingMemberTasks(false)
+        }
+    }
 
     if (loading) {
         return <div className="p-8 text-center text-muted-foreground">Yükleniyor...</div>
@@ -101,21 +142,42 @@ export default function TeamPage() {
                 </div>
 
                 <button
-                    onClick={() => {
-                        const headers = "Ad Soyad,Departman,Toplam Görev,Tamamlanan,Başarı Oranı\n";
-                        const csv = stats.map(m => `${m.name},${m.department},${m.total_tasks},${m.completed_tasks},%${m.ratio}`).join("\n");
-                        const blob = new Blob(["\ufeff" + headers + csv], { type: 'text/csv;charset=utf-8;' });
-                        const link = document.createElement("a");
-                        link.href = URL.createObjectURL(blob);
-                        link.setAttribute("download", `Ekip_Performans_Raporu_${new Date().toLocaleDateString('tr-TR')}.csv`);
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
+                    onClick={async () => {
+                        try {
+                            const params = new URLSearchParams()
+                            if (selectedDepartment) params.set('department', selectedDepartment)
+                            if (selectedUnit) params.set('unit', selectedUnit)
+                            if (selectedMeetingType) params.set('meeting_type', selectedMeetingType)
+                            
+                            const res = await fetch(`/api/stats/team/export-tasks?${params.toString()}`)
+                            if (!res.ok) throw new Error('Görevler alınamadı')
+                            const data = await res.json()
+                            
+                            const XLSX = await import('xlsx')
+                            const ws = XLSX.utils.json_to_sheet(data.tasks.map((t: any) => ({
+                                'Görev Adı': t.task_title,
+                                'Durum': t.is_completed ? 'Tamamlandı' : 'Devam Ediyor',
+                                'Sorumlu': t.assignee_name || 'Atanmadı',
+                                'Sorumlu Departmanı': t.assignee_department || 'Belirtilmedi',
+                                'Kurul': t.meeting_type,
+                                'Departman': t.folder_title,
+                                'Liste / Birim': t.list_title,
+                                'Atanma Tarihi': t.created_at,
+                                'Termin Tarihi': t.due_date,
+                            })))
+                            
+                            const wb = XLSX.utils.book_new()
+                            XLSX.utils.book_append_sheet(wb, ws, "Görevler")
+                            XLSX.writeFile(wb, `Filtrelenmis_Gorevler_${new Date().toLocaleDateString('tr-TR')}.xlsx`)
+                        } catch (err) {
+                            console.error('İndirme hatası', err)
+                            alert('Görevler indirilirken bir hata oluştu.')
+                        }
                     }}
-                    className="flex items-center gap-2 px-4 py-2 bg-[#00205B] text-white rounded-xl hover:bg-[#003399] transition-all shadow-lg text-sm font-semibold"
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600/90 text-white rounded-xl hover:bg-emerald-600 transition-all shadow-lg text-sm font-semibold whitespace-nowrap"
                 >
                     <Download className="h-4 w-4" />
-                    Raporu İndir (.csv)
+                    Filtrelenmiş Görevleri İndir (.xlsx)
                 </button>
             </header>
 
@@ -148,11 +210,40 @@ export default function TeamPage() {
                         </option>
                     ))}
                 </select>
+
+                <select
+                    value={selectedMeetingType}
+                    onChange={(e) => setSelectedMeetingType(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-md bg-background"
+                >
+                    <option value="">Tüm Kurullar</option>
+                    {meetingTypes.map((meetingType) => (
+                        <option key={meetingType.name} value={meetingType.name}>
+                            {meetingType.name} ({meetingType.completed_tasks}/{meetingType.total_tasks})
+                        </option>
+                    ))}
+                </select>
             </div>
+
+            {meetingTypes.length > 0 && (
+                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+                    {meetingTypes.map((meetingType) => (
+                        <button
+                            key={meetingType.name}
+                            type="button"
+                            onClick={() => setSelectedMeetingType((current) => current === meetingType.name ? '' : meetingType.name)}
+                            className={`text-left rounded-xl border p-3 transition ${selectedMeetingType === meetingType.name ? 'border-[#00205B] bg-[#00205B]/5' : 'border-muted bg-card hover:bg-muted/30'}`}
+                        >
+                            <p className="text-sm font-semibold truncate">{meetingType.name}</p>
+                            <p className="text-xs text-muted-foreground mt-1">{meetingType.completed_tasks}/{meetingType.total_tasks} tamamlandı • %{meetingType.ratio}</p>
+                        </button>
+                    ))}
+                </div>
+            )}
 
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                 {stats.map((member, index) => (
-                    <Card key={member.id} className="overflow-hidden border-none shadow-md hover:shadow-xl transition-all duration-300 group">
+                    <Card key={member.id} className="overflow-hidden border-none shadow-md hover:shadow-xl transition-all duration-300 group cursor-pointer" onClick={() => loadMemberTasks(member)}>
                         <div className="absolute top-0 left-0 w-1 h-full bg-[#00205B] group-hover:bg-[#FF671F] transition-colors" />
                         <CardContent className="p-6">
                             <div className="flex items-start justify-between mb-4">
@@ -197,6 +288,94 @@ export default function TeamPage() {
                     </Card>
                 ))}
             </div>
+
+            {selectedMember && (
+                <Card className="border shadow-sm">
+                    <CardHeader className="flex flex-row items-center justify-between pb-2 border-b">
+                        <CardTitle className="text-base text-[#00205B]">
+                            {selectedMember.name} • Detaylı Görev Listesi {selectedMeetingType ? `(${selectedMeetingType})` : ''}
+                        </CardTitle>
+                        <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                            onClick={async () => {
+                                try {
+                                    const params = new URLSearchParams()
+                                    params.set('user_id', selectedMember.id)
+                                    if (selectedMeetingType) params.set('meeting_type', selectedMeetingType)
+                                    
+                                    const res = await fetch(`/api/stats/team/export-tasks?${params.toString()}`)
+                                    if (!res.ok) throw new Error('Görevler alınamadı')
+                                    const data = await res.json()
+                                    
+                                    const XLSX = await import('xlsx')
+                                    const ws = XLSX.utils.json_to_sheet(data.tasks.map((t: any) => ({
+                                        'Görev Adı': t.task_title,
+                                        'Durum': t.is_completed ? 'Tamamlandı' : 'Devam Ediyor',
+                                        'Kurul': t.meeting_type,
+                                        'Departman': t.folder_title,
+                                        'Liste / Birim': t.list_title,
+                                        'Atanma Tarihi': t.created_at,
+                                        'Termin Tarihi': t.due_date,
+                                    })))
+                                    
+                                    const wb = XLSX.utils.book_new()
+                                    XLSX.utils.book_append_sheet(wb, ws, selectedMember.name.substring(0, 30))
+                                    XLSX.writeFile(wb, `${selectedMember.name.replace(/\s+/g, '_')}_Gorevleri.xlsx`)
+                                } catch (err) {
+                                    console.error('İndirme hatası', err)
+                                    alert('Görevler indirilirken bir hata oluştu.')
+                                }
+                            }}
+                        >
+                            <Download className="h-4 w-4 mr-2" /> 
+                            Kullanıcının Görevlerini İndir
+                        </Button>
+                    </CardHeader>
+                    <CardContent className="space-y-4 pt-4">
+                        <div className="flex items-center gap-3">
+                            <span className="px-3 py-1 bg-muted text-foreground rounded-full text-xs font-semibold border">
+                                Toplam: {memberTasks.length}
+                            </span>
+                            <span className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-semibold border border-emerald-200">
+                                Tamamlanan: {memberTasks.filter(t => t.is_completed).length}
+                            </span>
+                            <span className="px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-semibold border border-amber-200">
+                                Devam Eden: {memberTasks.filter(t => !t.is_completed).length}
+                            </span>
+                            <span className="px-3 py-1 bg-rose-100 text-rose-700 rounded-full text-xs font-semibold border border-rose-200">
+                                Geciken: {memberTasks.filter(t => !t.is_completed && t.due_date && new Date(t.due_date) < new Date()).length}
+                            </span>
+                        </div>
+                        {loadingMemberTasks ? (
+                            <p className="text-sm text-muted-foreground">Yükleniyor...</p>
+                        ) : memberTasks.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">Görev bulunamadı.</p>
+                        ) : (
+                            memberTasks.map((task) => {
+                                const isOverdue = !task.is_completed && task.due_date && new Date(task.due_date) < new Date()
+                                return (
+                                <div key={task.id} className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm transition-colors ${isOverdue ? 'border-rose-200 bg-rose-50/50' : ''}`}>
+                                    <div>
+                                        <p className="font-medium">{task.title}</p>
+                                        <p className="text-xs text-muted-foreground">{task.folder_title || '-'} / {task.list_title || '-'}</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className={task.is_completed ? 'text-emerald-600 text-xs font-semibold' : (isOverdue ? 'text-rose-600 text-xs font-semibold' : 'text-amber-600 text-xs font-semibold')}>
+                                            {task.is_completed ? 'Tamamlandı' : (isOverdue ? 'Gecikti' : 'Devam Ediyor')}
+                                        </p>
+                                        <p className="text-xs text-muted-foreground">
+                                            {task.due_date ? new Date(task.due_date).toLocaleDateString('tr-TR') : '-'}
+                                        </p>
+                                    </div>
+                                </div>
+                                )
+                            })
+                        )}
+                    </CardContent>
+                </Card>
+            )}
         </div>
     )
 }

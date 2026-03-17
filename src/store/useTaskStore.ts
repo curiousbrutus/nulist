@@ -205,8 +205,20 @@ export const useTaskStore = create<TaskState>((set, get) => ({
             return
         }
 
-        // Hemen refresh et
-        await get().fetchInitialData()
+        const refreshedTask = await apiCall<any>(`/api/tasks/${taskId}`)
+        if (refreshedTask) {
+            const normalizedTask = normalizeKeys<Task>(refreshedTask)
+            const previousSelectedTask = get().selectedTask
+            set({
+                tasks: get().tasks.map(t => t.id === taskId ? { ...t, ...normalizedTask } : t),
+                selectedTask: previousSelectedTask?.id === taskId
+                    ? ({ ...previousSelectedTask, ...normalizedTask } as Task)
+                    : previousSelectedTask
+            })
+        } else {
+            await get().fetchInitialData()
+        }
+
         useToastStore.getState().showToast('Atama yapıldı', 'success')
     },
 
@@ -220,18 +232,47 @@ export const useTaskStore = create<TaskState>((set, get) => ({
             return
         }
 
-        // Hemen refresh et
-        await get().fetchInitialData()
+        const refreshedTask = await apiCall<any>(`/api/tasks/${taskId}`)
+        if (refreshedTask) {
+            const normalizedTask = normalizeKeys<Task>(refreshedTask)
+            const previousSelectedTask = get().selectedTask
+            set({
+                tasks: get().tasks.map(t => t.id === taskId ? { ...t, ...normalizedTask } : t),
+                selectedTask: previousSelectedTask?.id === taskId
+                    ? ({ ...previousSelectedTask, ...normalizedTask } as Task)
+                    : previousSelectedTask
+            })
+        } else {
+            await get().fetchInitialData()
+        }
+
         useToastStore.getState().showToast('Atama kaldırıldı', 'success')
     },
 
     toggleAssigneeCompletion: async (taskId, userId, currentStatus) => {
-        // Task assignee'nin completion durumunu toggle et
-        // Not: Bu işlem için direkt bir API endpoint yok, folder-members PUT kullanabiliriz
-        // Ancak task_assignees tablosunda is_completed field'i var
-        // Şimdilik fetchInitialData ile refresh edelim
-        // TODO: Gelecekte /api/task-assignees/[id] PUT endpoint'i eklenebilir
-        await get().fetchInitialData()
+        const data = await apiCall(`/api/task-assignees/${userId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ task_id: taskId, is_completed: !Boolean(currentStatus) })
+        })
+
+        if (!data) {
+            useToastStore.getState().showToast('Tamamlanma güncellenemedi', 'error')
+            return
+        }
+
+        const refreshedTask = await apiCall<any>(`/api/tasks/${taskId}`)
+        if (refreshedTask) {
+            const normalizedTask = normalizeKeys<Task>(refreshedTask)
+            const previousSelectedTask = get().selectedTask
+            set({
+                tasks: get().tasks.map(t => t.id === taskId ? { ...t, ...normalizedTask } : t),
+                selectedTask: previousSelectedTask?.id === taskId
+                    ? ({ ...previousSelectedTask, ...normalizedTask } as Task)
+                    : previousSelectedTask
+            })
+        } else {
+            await get().fetchInitialData()
+        }
     },
 
     toggleTask: async (taskId, currentStatus) => {

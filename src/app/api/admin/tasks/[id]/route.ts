@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { executeQuery, executeNonQuery } from '@/lib/oracle'
 import { auth } from '@/auth'
+import { deleteZimbraTaskViaAdminAPI } from '@/lib/zimbra-sync'
 
 export async function PUT(
     request: NextRequest,
@@ -85,7 +86,44 @@ export async function DELETE(
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         }
 
-        // Delete task and related data
+        // Fetch linked Zimbra task IDs before deleting local assignments
+        const syncedAssignees = await executeQuery(
+            `SELECT ta.zimbra_task_id, p.email, p.zimbra_sync_enabled
+             FROM task_assignees ta
+             JOIN profiles p ON p.id = ta.user_id
+             WHERE ta.task_id = :task_id
+               AND ta.zimbra_task_id IS NOT NULL`,
+            { task_id: id }
+        )
+
+        // Try immediate remote delete; fallback to queue if remote API fails
+        for (const row of syncedAssignees || []) {
+            const zimbraTaskId = row.zimbra_task_id || row.ZIMBRA_TASK_ID
+            const email = row.email || row.EMAIL
+            const syncEnabled = Number(row.zimbra_sync_enabled ?? row.ZIMBRA_SYNC_ENABLED ?? 0) === 1
+
+            if (!zimbraTaskId || !email || !syncEnabled) continue
+
+            try {
+                await deleteZimbraTaskViaAdminAPI(String(email), String(zimbraTaskId))
+            } catch (remoteDeleteErr) {
+                console.error('Admin delete: immediate Zimbra delete failed, queueing fallback', remoteDeleteErr)
+                try {
+                    const payload = JSON.stringify({
+                        zimbra_task_id: String(zimbraTaskId),
+                        email: String(email)
+                    })
+                    await executeNonQuery(
+                        `INSERT INTO sync_queue (id, task_id, user_email, action_type, payload, status)
+                         VALUES (SYS_GUID(), :tid, :uemail, 'DELETE', :payload, 'PENDING')`,
+                        { tid: id, uemail: String(email), payload }
+                    )
+                } catch (queueErr) {
+                    console.error('Admin delete: fallback queue insert failed', queueErr)
+                }
+            }
+        }
+
         await executeNonQuery(
             `DELETE FROM task_assignees WHERE task_id = :id`,
             { id }

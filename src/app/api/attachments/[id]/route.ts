@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { executeQuery, executeNonQuery } from '@/lib/oracle'
 import { LocalStorageService } from '@/lib/storage'
+import { checkAttachmentAccess } from '@/lib/auth-guard'
 
 export const runtime = 'nodejs'
 
@@ -17,6 +18,12 @@ export async function GET(
         const session = await auth()
         if (!session?.user) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Erişim kontrolü
+        const access = await checkAttachmentAccess(resolvedParams.id, session.user.id)
+        if (!access.allowed) {
+            return NextResponse.json({ error: access.reason }, { status: 403 })
         }
 
         const attachments = await executeQuery(
@@ -53,6 +60,12 @@ export async function DELETE(
         const session = await auth()
         if (!session?.user) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Erişim kontrolü
+        const access = await checkAttachmentAccess(resolvedParams.id, session.user.id)
+        if (!access.allowed) {
+            return NextResponse.json({ error: access.reason }, { status: 403 })
         }
 
         // Attachment bilgisini al

@@ -21,6 +21,19 @@ interface FeedbackItem {
     author_name: string
 }
 
+interface ScopeStats {
+    target_user_id: string
+    target_user_name?: string
+    target_user_email?: string
+    target_user_role?: string
+    total_tasks: number
+    visible_tasks: number
+    total_lists: number
+    visible_lists: number
+    total_folders: number
+    visible_folders: number
+}
+
 export default function TasksManagement() {
     const { showToast } = useToast()
     const [tasks, setTasks] = useState<TaskWithDetails[]>([])
@@ -33,6 +46,9 @@ export default function TasksManagement() {
     const [feedbackHistory, setFeedbackHistory] = useState<FeedbackItem[]>([])
     const [selectedAssignee, setSelectedAssignee] = useState<string>('')
     const [showReassignModal, setShowReassignModal] = useState(false)
+    const [scopeUserId, setScopeUserId] = useState('')
+    const [scopeStats, setScopeStats] = useState<ScopeStats | null>(null)
+    const [scopeLoading, setScopeLoading] = useState(false)
 
     useEffect(() => {
         fetchTasks()
@@ -60,11 +76,46 @@ export default function TasksManagement() {
             if (res.ok) {
                 const data = await res.json()
                 setUsers(data)
+                if (Array.isArray(data) && data.length > 0 && !scopeUserId) {
+                    const preferred = data.find((u: any) => (u.role || '').toLowerCase() === 'user') || data[0]
+                    if (preferred?.id) {
+                        setScopeUserId(preferred.id)
+                    }
+                }
             }
         } catch (error) {
             console.error('Fetch users error:', error)
         }
     }
+
+    const fetchScopeStats = async (targetUserId: string) => {
+        if (!targetUserId) {
+            setScopeStats(null)
+            return
+        }
+
+        setScopeLoading(true)
+        try {
+            const res = await fetch(`/api/admin/tasks/scope?user_id=${encodeURIComponent(targetUserId)}`)
+            if (res.ok) {
+                const data = await res.json()
+                setScopeStats(data)
+            } else {
+                setScopeStats(null)
+            }
+        } catch (error) {
+            console.error('Fetch scope stats error:', error)
+            setScopeStats(null)
+        } finally {
+            setScopeLoading(false)
+        }
+    }
+
+    useEffect(() => {
+        if (scopeUserId) {
+            fetchScopeStats(scopeUserId)
+        }
+    }, [scopeUserId])
 
     const handleToggleCompletion = async (taskId: string, assigneeId: string, currentStatus: boolean) => {
         try {
@@ -172,6 +223,55 @@ export default function TasksManagement() {
                     <p className="text-gray-600 dark:text-gray-400">
                         Tüm görevleri yönet, sorumlu ata ve geri bildirim ver
                     </p>
+                </div>
+
+                <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
+                        <div>
+                            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Görünürlük Analizi</h2>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Toplam veri ile seçili kullanıcı kapsamını karşılaştırır.</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <select
+                                className="px-3 py-2 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white min-w-[260px]"
+                                value={scopeUserId}
+                                onChange={(e) => setScopeUserId(e.target.value)}
+                            >
+                                <option value="">Kullanıcı seçin...</option>
+                                {users.map((u) => (
+                                    <option key={u.id} value={u.id}>{u.full_name || u.email} ({u.role || 'user'})</option>
+                                ))}
+                            </select>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => fetchScopeStats(scopeUserId)}
+                                disabled={!scopeUserId || scopeLoading}
+                            >
+                                {scopeLoading ? 'Hesaplanıyor...' : 'Yenile'}
+                            </Button>
+                        </div>
+                    </div>
+
+                    {scopeStats && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                            <div className="p-3 rounded-md bg-gray-50 dark:bg-gray-700/40 border border-gray-200 dark:border-gray-700">
+                                <p className="font-semibold text-gray-700 dark:text-gray-200">Görev</p>
+                                <p className="mt-1 text-gray-600 dark:text-gray-300">Toplam: <span className="font-bold">{scopeStats.total_tasks}</span></p>
+                                <p className="text-gray-600 dark:text-gray-300">Görünür: <span className="font-bold">{scopeStats.visible_tasks}</span></p>
+                            </div>
+                            <div className="p-3 rounded-md bg-gray-50 dark:bg-gray-700/40 border border-gray-200 dark:border-gray-700">
+                                <p className="font-semibold text-gray-700 dark:text-gray-200">Liste</p>
+                                <p className="mt-1 text-gray-600 dark:text-gray-300">Toplam: <span className="font-bold">{scopeStats.total_lists}</span></p>
+                                <p className="text-gray-600 dark:text-gray-300">Görünür: <span className="font-bold">{scopeStats.visible_lists}</span></p>
+                            </div>
+                            <div className="p-3 rounded-md bg-gray-50 dark:bg-gray-700/40 border border-gray-200 dark:border-gray-700">
+                                <p className="font-semibold text-gray-700 dark:text-gray-200">Klasör</p>
+                                <p className="mt-1 text-gray-600 dark:text-gray-300">Toplam: <span className="font-bold">{scopeStats.total_folders}</span></p>
+                                <p className="text-gray-600 dark:text-gray-300">Görünür: <span className="font-bold">{scopeStats.visible_folders}</span></p>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

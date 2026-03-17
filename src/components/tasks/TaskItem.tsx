@@ -13,7 +13,7 @@ interface TaskItemProps {
 }
 
 export default function TaskItem({ task }: TaskItemProps) {
-    const { user } = useAuthStore()
+    const { user, profile } = useAuthStore()
     const { folders, lists, toggleTask, setSelectedTask } = useTaskStore()
 
     const list = lists.find(l => l.id === task.list_id)
@@ -27,9 +27,23 @@ export default function TaskItem({ task }: TaskItemProps) {
 
     const isAssignee = task.task_assignees?.some(ta => ta.user_id === user?.id)
     const isOwner = folder?.user_id === user?.id
-    const isAdmin = (user as any)?.role === 'admin'
+    const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin'
     // Master toggle: Klasör sahibi, atanan kişi VEYA ADMIN değiştirebilir
     const canToggle = isOwner || isAssignee || isAdmin
+
+    const dueDate = task.due_date ? new Date(task.due_date) : null
+    const dayMs = 1000 * 60 * 60 * 24
+    const daysRemaining = dueDate ? Math.ceil((dueDate.getTime() - Date.now()) / dayMs) : null
+
+    const dueDateClass = !dueDate || task.is_completed
+        ? 'text-muted-foreground'
+        : daysRemaining !== null && daysRemaining < 0
+            ? 'text-red-600 font-semibold'
+            : daysRemaining !== null && daysRemaining <= 1
+                ? 'text-amber-600 font-semibold'
+                : daysRemaining !== null && daysRemaining <= 3
+                    ? 'text-blue-600 font-semibold'
+                    : 'text-muted-foreground'
 
     const handleToggle = (e: React.MouseEvent) => {
         e.stopPropagation()
@@ -50,7 +64,7 @@ export default function TaskItem({ task }: TaskItemProps) {
             animate={{ opacity: 1, y: 0 }}
             onClick={() => setSelectedTask(task)}
             className={clsx(
-                "group flex flex-col gap-2 p-3 bg-card hover:bg-accent/40 border rounded-xl transition-all cursor-pointer shadow-sm hover:shadow-md relative overflow-hidden",
+                "group flex flex-col gap-2 p-3 bg-card/80 backdrop-blur-md hover:bg-card border rounded-2xl transition-all duration-300 cursor-pointer shadow-[0_4px_20px_rgb(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:ring-1 hover:ring-primary/20 relative overflow-hidden",
                 task.is_completed && "opacity-60 bg-accent/20"
             )}
         >
@@ -80,15 +94,15 @@ export default function TaskItem({ task }: TaskItemProps) {
                     <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                         {/* Departman / Liste bilgisi */}
                         {folder && list && (
-                            <div className="flex items-center gap-1 text-[10px] text-muted-foreground font-medium bg-muted/50 px-1.5 py-0.5 rounded">
-                                <Folder className="h-2.5 w-2.5 text-amber-500" />
-                                <span className="truncate max-w-[60px]">{folder.title}</span>
+                            <div className="flex items-center gap-1.5 text-xs text-foreground/90 font-semibold bg-muted/70 px-2 py-1 rounded-md">
+                                <Folder className="h-3.5 w-3.5 text-amber-500" />
+                                <span className="truncate max-w-[130px]">{folder.title}</span>
                                 <span className="text-muted-foreground/50">/</span>
-                                <span className="truncate max-w-[60px]">{list.title}</span>
+                                <span className="truncate max-w-[130px]">{list.title}</span>
                             </div>
                         )}
                         {task.due_date && (
-                            <div className="flex items-center gap-1 text-[10px] text-muted-foreground font-medium">
+                            <div className={clsx("flex items-center gap-1 text-[10px] font-medium", dueDateClass)}>
                                 <Calendar className="h-3 w-3" />
                                 {new Date(task.due_date).toLocaleDateString('tr-TR')}
                             </div>

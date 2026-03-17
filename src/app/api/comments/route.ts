@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { executeQuery, executeNonQuery } from '@/lib/oracle'
+import { createNotificationEvent } from '@/lib/notifications'
 
 export const runtime = 'nodejs'
 
@@ -44,6 +45,33 @@ export async function POST(request: NextRequest) {
             { id: newId },
             session.user.id
         )
+
+        try {
+            const recipientRows = await executeQuery(
+                `SELECT DISTINCT ta.user_id
+                 FROM task_assignees ta
+                 WHERE ta.task_id = :task_id`,
+                { task_id },
+                session.user.id
+            )
+
+            const recipients = recipientRows
+                .map((r: any) => String(r.user_id || r.USER_ID || ''))
+                .filter((id: string) => Boolean(id) && id !== session.user.id)
+
+            await createNotificationEvent({
+                eventType: 'comment_added',
+                taskId: task_id,
+                actorUserId: session.user.id,
+                recipientUserIds: recipients,
+                payload: {
+                    content: String(content).slice(0, 500)
+                },
+                dedupeSeed: `comment:${newId}`
+            })
+        } catch (notificationError) {
+            console.error('Comment notification enqueue error (non-blocking):', notificationError)
+        }
 
         return NextResponse.json(comments[0], { status: 201 })
     } catch (error: any) {

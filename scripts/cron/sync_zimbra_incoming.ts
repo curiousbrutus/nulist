@@ -66,6 +66,104 @@ async function ensureDefaultList(folderId: string): Promise<string> {
     return listId
 }
 
+async function ensureDepartmentListForUser(userId: string): Promise<string | null> {
+    const assignments = await executeQuery(
+        `SELECT d.name AS department_name,
+                f.name AS facility_name,
+                ud.is_primary,
+                ud.assigned_at
+         FROM user_departments ud
+         JOIN departments d ON d.id = ud.department_id
+         JOIN facilities f ON f.id = d.facility_id
+         WHERE ud.user_id = :userid
+         ORDER BY ud.is_primary DESC, ud.assigned_at ASC`,
+        { userid: userId }
+    )
+
+    if (!assignments || assignments.length === 0) {
+        return null
+    }
+
+    for (const assignment of assignments) {
+        const departmentName = String(assignment.DEPARTMENT_NAME || assignment.department_name || '').trim()
+        const facilityName = String(assignment.FACILITY_NAME || assignment.facility_name || '').trim()
+        if (!departmentName) continue
+
+        const parentFolder = facilityName
+            ? await executeQuery(
+                `SELECT id
+                 FROM folders
+                 WHERE UPPER(TRIM(title)) = UPPER(TRIM(:facility_name))
+                   AND parent_id IS NULL
+                 ORDER BY created_at ASC
+                 FETCH FIRST 1 ROWS ONLY`,
+                { facility_name: facilityName }
+            )
+            : []
+
+        const parentId = parentFolder?.[0]?.ID || parentFolder?.[0]?.id || null
+
+        const existingFolder = await executeQuery(
+            `SELECT f.id
+             FROM folders f
+             WHERE UPPER(TRIM(f.title)) = UPPER(TRIM(:department_name))
+               AND (
+                    (:parent_id IS NULL AND f.parent_id IS NULL)
+                    OR f.parent_id = :parent_id
+               )
+             ORDER BY f.created_at ASC
+             FETCH FIRST 1 ROWS ONLY`,
+            {
+                department_name: departmentName,
+                parent_id: parentId
+            }
+        )
+
+        let folderId = existingFolder?.[0]?.ID || existingFolder?.[0]?.id
+
+        if (!folderId) {
+            folderId = crypto.randomUUID()
+
+            await executeNonQuery(
+                `INSERT INTO folders (id, title, user_id, parent_id)
+                 VALUES (:id, :title, :userid, :parent_id)`,
+                {
+                    id: folderId,
+                    title: departmentName,
+                    userid: userId,
+                    parent_id: parentId
+                }
+            )
+        }
+
+        const memberExists = await executeQuery(
+            `SELECT 1
+             FROM folder_members
+             WHERE folder_id = :folder_id
+               AND user_id = :user_id`,
+            { folder_id: folderId, user_id: userId }
+        )
+
+        if (!memberExists || memberExists.length === 0) {
+            await executeNonQuery(
+                `INSERT INTO folder_members (
+                    id, folder_id, user_id, role, can_add_task, can_assign_task, can_delete_task, can_add_list
+                 ) VALUES (
+                    SYS_GUID(), :folder_id, :user_id, 'member', 1, 1, 0, 0
+                 )`,
+                {
+                    folder_id: folderId,
+                    user_id: userId
+                }
+            )
+        }
+
+        return await ensureDefaultList(folderId)
+    }
+
+    return null
+}
+
 function extractTaskData(zTask: any): {
     name: string
     description: string
@@ -178,13 +276,8 @@ async function syncUserTasks(userId: string, userEmail: string) {
                         { ic: zIsCompleted ? 1 : 0, tid: taskId, userid: userId }
                     )
 
-                    await executeNonQuery(
-                        `UPDATE tasks SET status = :st, is_completed = :ic WHERE id = :tid`,
-                        { st: zNeoStatus, ic: zIsCompleted ? 1 : 0, tid: taskId }
-                    )
-
                     statusUpdated++
-                    console.log(`    Status sync: "${dbTask.TITLE || dbTask.title}" ${localStatus} -> ${zNeoStatus}`)
+                    console.log(`    Assignee completion sync: "${dbTask.TITLE || dbTask.title}" ${localCompleted ? 'done' : 'open'} -> ${zIsCompleted ? 'done' : 'open'}`)
                 }
             } else {
                 // Track the stored ID format for existing entries
@@ -199,7 +292,8 @@ async function syncUserTasks(userId: string, userEmail: string) {
 
         // Phase 2: Import NEW Zimbra tasks (not yet in NeoList)
         let imported = 0
-        let defaultListId: string | null = null
+        let fallbackDefaultListId: string | null = null
+        let assignedDepartmentListId: string | null = null
 
         for (const zTask of zTasks) {
             const calItemId = String(zTask.id || '')
@@ -223,11 +317,17 @@ async function syncUserTasks(userId: string, userEmail: string) {
             // This is a new Zimbra task - import it
             const data = extractTaskData(zTask)
 
-            // Lazy-create default folder/list
-            if (!defaultListId) {
-                const folderId = await ensureDefaultFolder(userId)
-                defaultListId = await ensureDefaultList(folderId)
+            if (!assignedDepartmentListId) {
+                assignedDepartmentListId = await ensureDepartmentListForUser(userId)
             }
+
+            if (!assignedDepartmentListId && !fallbackDefaultListId) {
+                const folderId = await ensureDefaultFolder(userId)
+                fallbackDefaultListId = await ensureDefaultList(folderId)
+            }
+
+            const targetListId = assignedDepartmentListId || fallbackDefaultListId
+            if (!targetListId) continue
 
             const newTaskId = crypto.randomUUID()
 
@@ -237,7 +337,7 @@ async function syncUserTasks(userId: string, userEmail: string) {
                  VALUES (:id, :list_id, :title, :notes, :ic, :priority, :due_date, :status, :created_by)`,
                 {
                     id: newTaskId,
-                    list_id: defaultListId,
+                    list_id: targetListId,
                     title: data.name,
                     notes: data.description || null,
                     ic: data.isCompleted ? 1 : 0,

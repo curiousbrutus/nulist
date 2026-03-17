@@ -4,14 +4,11 @@ import { executeQuery } from '@/lib/oracle'
 
 export const runtime = 'nodejs'
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || ''
-const FREE_MODELS = [
-    'nvidia/nemotron-nano-12b-v2-vl:free', // Primary - Vision + Language
-    'google/gemini-2.0-flash-exp:free',
-    'google/gemini-flash-1.5',
-    'meta-llama/llama-3.2-3b-instruct:free',
-    'nousresearch/hermes-3-llama-3.1-405b:free'
-]
+const OLLAMA_BASE_URL = process.env.OLLAMA_API_URL || 'http://127.0.0.1:11434'
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:3b'
+const OLLAMA_NUM_PREDICT = Number(process.env.OLLAMA_NUM_PREDICT || '256')
+const OLLAMA_NUM_CTX = Number(process.env.OLLAMA_NUM_CTX || '4096')
+const OLLAMA_TEMPERATURE = Number(process.env.OLLAMA_TEMPERATURE || '0.3')
 
 // POST /api/ai/chat - AI assistant for task analysis
 export async function POST(request: NextRequest) {
@@ -26,14 +23,6 @@ export async function POST(request: NextRequest) {
 
         if (!message) {
             return NextResponse.json({ error: 'Message is required' }, { status: 400 })
-        }
-
-        // Check if API key is configured
-        if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === 'your-openrouter-api-key-here') {
-            return NextResponse.json({ 
-                error: 'AI service not configured',
-                details: 'OpenRouter API key is missing. Please add OPENROUTER_API_KEY to .env.local file. Get your free key at https://openrouter.ai/keys'
-            }, { status: 503 })
         }
 
         // Get comprehensive task context
@@ -129,52 +118,66 @@ export async function POST(request: NextRequest) {
 
 Kullanıcı sorusuna göre yukarıdaki verileri kullanarak yardımcı ol.`
 
-        // Call OpenRouter API
-        const openRouterResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-                'Content-Type': 'application/json',
-                'HTTP-Referer': process.env.NEXTAUTH_URL || 'http://localhost:3000',
-                'X-Title': 'NeoList Task Manager'
-            },
-            body: JSON.stringify({
-                model: FREE_MODELS[0], // NVIDIA Nemotron Nano 12B V2 VL - 128K context
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { 
-                        role: 'user', 
-                        content: images && images.length > 0 ? [
-                            { type: 'text', text: message },
-                            ...images.map((img: string) => ({ type: 'image_url', image_url: { url: img } }))
-                        ] : message
-                    }
-                ],
-                temperature: 0.7,
-                max_tokens: 8000, // Leverage high context for detailed responses
-                top_p: 0.9
-            })
-        })
+        const userContent = images && images.length > 0
+            ? `${message}\n\nNot: Görsel analizi şu an bu modelde pasif, sadece metin üzerinden cevap ver.`
+            : message
 
-        if (!openRouterResponse.ok) {
-            const error = await openRouterResponse.text()
-            console.error('OpenRouter API error:', error)
-            return NextResponse.json(
-                { 
-                    error: 'AI service error', 
-                    details: `OpenRouter API returned ${openRouterResponse.status}: ${error.substring(0, 200)}`
+        let ollamaResponse: Response
+        try {
+            ollamaResponse = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
                 },
-                { status: openRouterResponse.status }
+                body: JSON.stringify({
+                    model: OLLAMA_MODEL,
+                    stream: false,
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: userContent }
+                    ],
+                    options: {
+                        temperature: OLLAMA_TEMPERATURE,
+                        top_p: 0.9,
+                        num_predict: OLLAMA_NUM_PREDICT,
+                        num_ctx: OLLAMA_NUM_CTX
+                    }
+                }),
+                signal: AbortSignal.timeout(120000)
+            })
+        } catch (networkError: any) {
+            return NextResponse.json(
+                {
+                    error: 'AI service unavailable',
+                    details: `Ollama erişilemedi (${OLLAMA_BASE_URL}). Servisi başlatın: ollama serve`
+                },
+                { status: 503 }
             )
         }
 
-        const data = await openRouterResponse.json()
-        const aiMessage = data.choices?.[0]?.message?.content || 'Üzgünüm, bir yanıt oluşturamadım.'
+        if (!ollamaResponse.ok) {
+            const error = await ollamaResponse.text()
+            console.error('Ollama API error:', error)
+            return NextResponse.json(
+                {
+                    error: 'AI service error',
+                    details: `Ollama ${ollamaResponse.status}: ${error.substring(0, 300)}`
+                },
+                { status: ollamaResponse.status }
+            )
+        }
+
+        const data = await ollamaResponse.json()
+        const aiMessage = data?.message?.content || 'Üzgünüm, bir yanıt oluşturamadım.'
 
         return NextResponse.json({
             message: aiMessage,
-            model: data.model,
-            usage: data.usage
+            model: data?.model || OLLAMA_MODEL,
+            usage: {
+                prompt_eval_count: data?.prompt_eval_count,
+                eval_count: data?.eval_count,
+                total_duration: data?.total_duration
+            }
         })
 
     } catch (error: any) {

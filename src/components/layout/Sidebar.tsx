@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Plus, Folder as FolderIcon, List as ListIcon, ChevronDown, ChevronRight, LogOut, Search, Settings, Trash2, Edit3, X as CloseIcon, Sun, Moon, Menu, Users, UserCheck, BarChart, Upload, Shield, Pin } from 'lucide-react'
 import { InitialsAvatar } from '@/components/ui/InitialsAvatar'
 import FolderMemberModal from './FolderMemberModal'
@@ -54,6 +54,33 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         onConfirm: () => void;
     }>({ isOpen: false, title: '', description: '', onConfirm: () => { } })
     const canDeleteDepartment = profile?.role === 'admin' || profile?.role === 'superadmin'
+
+    const topLevelFolders = useMemo(() => {
+        const sorted = folders
+            .filter(f => !f.parent_id)
+            .sort((a, b) => {
+                if (a.is_pinned && !b.is_pinned) return -1
+                if (!a.is_pinned && b.is_pinned) return 1
+                if (a.display_order !== b.display_order) {
+                    return (a.display_order || 999) - (b.display_order || 999)
+                }
+                return (a.title || '').localeCompare(b.title || '', 'tr')
+            })
+
+        const deduped: typeof sorted = []
+        let zimbraShown = false
+
+        for (const folder of sorted) {
+            const isZimbra = (folder.title || '').trim().toLowerCase() === 'zimbra görevleri'
+            if (isZimbra) {
+                if (zimbraShown) continue
+                zimbraShown = true
+            }
+            deduped.push(folder)
+        }
+
+        return deduped
+    }, [folders])
 
     // Handle sidebar resize
     useEffect(() => {
@@ -279,36 +306,36 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                     <div className="space-y-1">
                         <button
                             onClick={() => setSelectedListId('focus-today')}
-                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 ${selectedListId === 'focus-today' ? 'bg-[#FF671F] text-white shadow-lg shadow-orange-900/20 font-semibold' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}
+                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-200 ${selectedListId === 'focus-today' ? 'bg-white/15 text-white shadow-sm ring-1 ring-white/20 font-semibold' : 'text-white/80 hover:bg-white/10 hover:text-white hover:ring-1 hover:ring-white/10'}`}
                         >
                             <Sun className={`h-4 w-4 ${selectedListId === 'focus-today' ? 'text-white' : 'text-orange-400'}`} />
                             Bugün
                         </button>
                         <button
                             onClick={() => setSelectedListId('my-tasks')}
-                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 ${selectedListId === 'my-tasks' ? 'bg-[#FF671F] text-white shadow-lg shadow-orange-900/20 font-semibold' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}
+                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-200 ${selectedListId === 'my-tasks' ? 'bg-white/15 text-white shadow-sm ring-1 ring-white/20 font-semibold' : 'text-white/80 hover:bg-white/10 hover:text-white hover:ring-1 hover:ring-white/10'}`}
                         >
                             <UserCheck className={`h-4 w-4 ${selectedListId === 'my-tasks' ? 'text-white' : 'text-emerald-400'}`} />
                             Bana Atananlar
                         </button>
                         <button
                             onClick={() => setSelectedListId(null)}
-                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 ${selectedListId === null ? 'bg-[#FF671F] text-white shadow-lg shadow-orange-900/20 font-semibold' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}
+                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-200 ${selectedListId === null ? 'bg-white/15 text-white shadow-sm ring-1 ring-white/20 font-semibold' : 'text-white/80 hover:bg-white/10 hover:text-white hover:ring-1 hover:ring-white/10'}`}
                         >
                             <ListIcon className={`h-4 w-4 ${selectedListId === null ? 'text-white' : 'text-blue-400'}`} />
                             Tüm Görevler
                         </button>
                         <Link
                             href="/team"
-                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 ${selectedListId === 'team' ? 'bg-[#FF671F] text-white shadow-lg shadow-orange-900/20 font-semibold' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}
+                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-200 ${selectedListId === 'team' ? 'bg-white/15 text-white shadow-sm ring-1 ring-white/20 font-semibold' : 'text-white/80 hover:bg-white/10 hover:text-white hover:ring-1 hover:ring-white/10'}`}
                         >
                             <BarChart className="h-4 w-4 text-purple-400" />
                             Ekip Performansı
                         </Link>
-                        {(profile?.role === 'secretary' || profile?.role === 'superadmin') && (
+                        {profile && (
                             <Link
                                 href="/settings/sync"
-                                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 ${selectedListId === 'sync' ? 'bg-[#FF671F] text-white shadow-lg shadow-orange-900/20 font-semibold' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}
+                                className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-200 ${selectedListId === 'sync' ? 'bg-white/15 text-white shadow-sm ring-1 ring-white/20 font-semibold' : 'text-white/80 hover:bg-white/10 hover:text-white hover:ring-1 hover:ring-white/10'}`}
                             >
                                 <Shield className={`h-4 w-4 ${selectedListId === 'sync' ? 'text-white' : 'text-orange-400'}`} />
                                 Birim Yönetimi
@@ -319,7 +346,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                                 {profile?.role === 'admin' && (
                                     <Link
                                         href="/import"
-                                        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 text-white/80 hover:bg-white/10 hover:text-white"
+                                        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-200 text-white/80 hover:bg-white/10 hover:text-white hover:ring-1 hover:ring-white/10"
                                     >
                                         <Upload className="h-4 w-4 text-pink-400" />
                                         Toplu Görev Aktar
@@ -327,7 +354,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                                 )}
                                 <Link
                                     href="/admin"
-                                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 ${selectedListId === 'admin' ? 'bg-[#FF671F] text-white shadow-lg shadow-orange-900/20 font-semibold' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}
+                                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-200 ${selectedListId === 'admin' ? 'bg-white/15 text-white shadow-sm ring-1 ring-white/20 font-semibold' : 'text-white/80 hover:bg-white/10 hover:text-white hover:ring-1 hover:ring-white/10'}`}
                                 >
                                     <Shield className="h-4 w-4 text-red-400" />
                                     Admin Paneli
@@ -345,17 +372,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                         </div>
 
                         <div className="space-y-1">
-                            {folders
-                                .filter(f => !f.parent_id)
-                                .sort((a, b) => {
-                                    // Sort by: 1) pinned status (pinned first), 2) display_order, 3) title
-                                    if (a.is_pinned && !b.is_pinned) return -1
-                                    if (!a.is_pinned && b.is_pinned) return 1
-                                    if (a.display_order !== b.display_order) {
-                                        return (a.display_order || 999) - (b.display_order || 999)
-                                    }
-                                    return (a.title || '').localeCompare(b.title || '', 'tr')
-                                })
+                            {topLevelFolders
                                 .map((folder, fIndex) => (
                                 <div key={folder.id || `folder-${fIndex}`} className="space-y-0.5">
                                     {/* Top Level Folder (Department) */}
@@ -440,6 +457,59 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                                     {/* Subfolders (Units) */}
                                     {expandedFolders.includes(folder.id) && (
                                         <div className="ml-4 space-y-1 border-l border-white/5 pl-2 mt-1">
+                                            {lists.filter(l => l.folder_id === folder.id).length > 0 && (
+                                                <div className="space-y-0.5 pb-1 border-b border-white/5 mb-1">
+                                                    {lists.filter(l => l.folder_id === folder.id).map((list) => (
+                                                        <div key={list.id} className="group/list relative flex items-center">
+                                                            <button
+                                                                onClick={() => setSelectedListId(list.id)}
+                                                                className={`flex-1 text-left px-2 py-1 rounded-md text-[11px] font-light truncate transition-colors ${selectedListId === list.id ? 'bg-[#FF671F]/20 text-white pointer-events-none' : 'text-white/50 hover:bg-white/5 hover:text-white'}`}
+                                                            >
+                                                                {editingListId === list.id ? (
+                                                                    <Input
+                                                                        autoFocus
+                                                                        onFocus={(e) => e.target.select()}
+                                                                        className="h-5 text-[10px] p-0.5 bg-black/20 border-none text-white focus:ring-0"
+                                                                        value={editText}
+                                                                        onChange={(e) => setEditText(e.target.value)}
+                                                                        onBlur={() => handleRenameList(list.id)}
+                                                                        onKeyDown={(e) => e.key === 'Enter' && handleRenameList(list.id)}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                    />
+                                                                ) : (
+                                                                    list.title
+                                                                )}
+                                                            </button>
+                                                            {editingListId !== list.id && (
+                                                                <div className="absolute right-1 opacity-0 group-hover/list:opacity-100 flex items-center gap-0.5">
+                                                                    <button
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation()
+                                                                            setEditingListId(list.id)
+                                                                            setEditText(list.title)
+                                                                        }}
+                                                                        className="p-1 hover:bg-white/20 rounded text-white/30 hover:text-white"
+                                                                        title="Listeyi yeniden adlandır"
+                                                                    >
+                                                                        <Edit3 className="h-2 w-2" />
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation()
+                                                                            handleDeleteList(list.id)
+                                                                        }}
+                                                                        className="p-1 hover:bg-white/20 rounded text-white/30 hover:text-red-400"
+                                                                        title="Listeyi sil"
+                                                                    >
+                                                                        <Trash2 className="h-2 w-2" />
+                                                                    </button>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+
                                             {folders.filter(sf => sf.parent_id === folder.id).map((subFolder) => (
                                                 <div key={subFolder.id} className="space-y-0.5">
                                                     <div className="flex items-center group">

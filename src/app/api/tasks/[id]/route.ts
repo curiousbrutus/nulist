@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { executeQuery, executeNonQuery } from '@/lib/oracle'
 import { updateZimbraTaskViaAdminAPI, getZimbraTaskViaAdminAPI } from '@/lib/zimbra-sync'
+import { createNotificationEvent } from '@/lib/notifications'
+import { checkTaskAccess } from '@/lib/auth-guard'
 
 export const runtime = 'nodejs'
 
@@ -67,6 +69,12 @@ export async function GET(
         const session = await auth()
         if (!session?.user) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Erişim kontrolü
+        const access = await checkTaskAccess(id, session.user.id)
+        if (!access.allowed) {
+            return NextResponse.json({ error: access.reason }, { status: 403 })
         }
 
         // Task bilgisi
@@ -494,6 +502,32 @@ export async function PUT(
             }
         } catch (syncErr) {
             console.error('Zimbra sync update error:', syncErr)
+        }
+
+        if (completed !== undefined) {
+            try {
+                const recipientRows = await executeQuery(
+                    `SELECT DISTINCT user_id FROM task_assignees WHERE task_id = :task_id`,
+                    { task_id: resolvedParams.id },
+                    session.user.id
+                )
+                const recipients = recipientRows
+                    .map((r: any) => String(r.user_id || r.USER_ID || ''))
+                    .filter(Boolean)
+
+                await createNotificationEvent({
+                    eventType: 'task_status_changed',
+                    taskId: resolvedParams.id,
+                    actorUserId: session.user.id,
+                    recipientUserIds: recipients,
+                    payload: {
+                        completed: Boolean(completed)
+                    },
+                    dedupeSeed: `status:${resolvedParams.id}:${completed ? '1' : '0'}`
+                })
+            } catch (notificationError) {
+                console.error('Task status notification enqueue error (non-blocking):', notificationError)
+            }
         }
 
         return NextResponse.json(normalizePriorityFromDB(updatedTask))

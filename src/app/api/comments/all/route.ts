@@ -12,9 +12,23 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
+        const roleRows = await executeQuery(
+            `SELECT role FROM profiles WHERE id = :id`,
+            { id: session.user.id },
+            session.user.id
+        )
+        const role = roleRows[0]?.role || roleRows[0]?.ROLE
+        const isGlobalViewer = role === 'superadmin' || role === 'admin'
+
         // Kullanıcının erişebildiği task'ların tüm comments'larını getir
         const commentsRaw = await executeQuery(
-            `SELECT c.id, c.task_id, c.user_id, c.content, c.created_at,
+            isGlobalViewer
+                ? `SELECT c.id, c.task_id, c.user_id, c.content, c.created_at,
+                    p.id as profile_id, p.email as profile_email, p.full_name as profile_full_name, p.avatar_url as profile_avatar_url
+             FROM comments c
+             JOIN profiles p ON c.user_id = p.id
+             ORDER BY c.created_at DESC`
+                : `SELECT c.id, c.task_id, c.user_id, c.content, c.created_at,
                     p.id as profile_id, p.email as profile_email, p.full_name as profile_full_name, p.avatar_url as profile_avatar_url
              FROM comments c
              JOIN profiles p ON c.user_id = p.id
@@ -30,7 +44,7 @@ export async function GET(request: NextRequest) {
                  )
              )
              ORDER BY c.created_at DESC`,
-            { user_id: session.user.id },
+            isGlobalViewer ? {} : { user_id: session.user.id },
             session.user.id
         )
 

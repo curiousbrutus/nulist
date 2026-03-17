@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { executeQuery, executeNonQuery } from '@/lib/oracle'
 import { createZimbraTaskViaAdminAPI } from '@/lib/zimbra-sync'
+import { createNotificationEvent } from '@/lib/notifications'
 
 export const runtime = 'nodejs'
 
@@ -44,6 +45,21 @@ export async function POST(request: NextRequest) {
         )
 
         const assignee = assignees[0]
+
+        try {
+            await createNotificationEvent({
+                eventType: 'task_assigned',
+                taskId: task_id,
+                actorUserId: session.user.id,
+                recipientUserIds: [user_id],
+                payload: {
+                    assigned_by: session.user.id
+                },
+                dedupeSeed: `assign:${task_id}:${user_id}`
+            })
+        } catch (notificationError) {
+            console.error('Notification enqueue error (non-blocking):', notificationError)
+        }
 
         // Atanan kullanıcının Zimbra sync'i aktifse, görevi kuyruğa ekle (Queue)
         if (assignee && assignee.zimbra_sync_enabled === 1 && assignee.email) {
