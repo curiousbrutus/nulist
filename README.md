@@ -289,7 +289,7 @@ Bu proje özel lisans altındadır. Tüm hakları saklıdır.
 
 ## 📞 Destek
 
-- 📧 Email: destek@optimed.com.tr
+- 📧 Email: support@example.com
 - 💬 Telegram: Sistem yöneticinize başvurun
 
 ---

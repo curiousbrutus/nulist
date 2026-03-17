@@ -9,10 +9,10 @@ async function checkProfiles() {
     await initializePool();
     
     const emails = [
-      'merveagdagli@optimed.com.tr',
-      'nagihanavci@optimed.com.tr',
-      'elcinesenesiyok@optimed.com.tr',
-      'arzucerentuna@optimed.com.tr'
+      'user1@example.com',
+      'user2@example.com',
+      'user3@example.com',
+      'user4@example.com'
     ];
 
     const sql = `

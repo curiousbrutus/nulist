@@ -4,12 +4,12 @@ module.exports = {
             name: 'neolist',
             script: 'node_modules/next/dist/bin/next',
             args: 'start',
-            cwd: 'C:\\Users\\Administrator\\Desktop\\neolist',
+            cwd: process.env.APP_CWD || process.cwd(),
             env: {
                 NODE_ENV: 'production',
                 PORT: 4554,
-                TNS_ADMIN: 'C:\\app\\oracle\\product\\12.1.0\\client_1\\network\\admin',
-                ORACLE_HOME: 'C:\\app\\oracle\\product\\12.1.0\\client_1',
+                TNS_ADMIN: process.env.TNS_ADMIN || '',
+                ORACLE_HOME: process.env.ORACLE_HOME || '',
                 NLS_LANG: 'TURKISH_TURKEY.AL32UTF8'
             },
             instances: 1,
@@ -27,11 +27,11 @@ module.exports = {
             script: 'scripts/services/queue_worker.ts',
             interpreter: 'node',
             node_args: '--import tsx',
-            cwd: 'C:\\Users\\Administrator\\Desktop\\neolist',
+            cwd: process.env.APP_CWD || process.cwd(),
             env: {
                 NODE_ENV: 'production',
-                TNS_ADMIN: 'C:\\app\\oracle\\product\\12.1.0\\client_1\\network\\admin',
-                ORACLE_HOME: 'C:\\app\\oracle\\product\\12.1.0\\client_1',
+                TNS_ADMIN: process.env.TNS_ADMIN || '',
+                ORACLE_HOME: process.env.ORACLE_HOME || '',
                 NLS_LANG: 'TURKISH_TURKEY.AL32UTF8'
             },
             instances: 1,
@@ -43,11 +43,11 @@ module.exports = {
             script: 'scripts/cron/sync_zimbra_incoming.ts',
             interpreter: 'node',
             node_args: '--import tsx',
-            cwd: 'C:\\Users\\Administrator\\Desktop\\neolist',
+            cwd: process.env.APP_CWD || process.cwd(),
             env: {
                 NODE_ENV: 'production',
-                TNS_ADMIN: 'C:\\app\\oracle\\product\\12.1.0\\client_1\\network\\admin',
-                ORACLE_HOME: 'C:\\app\\oracle\\product\\12.1.0\\client_1',
+                TNS_ADMIN: process.env.TNS_ADMIN || '',
+                ORACLE_HOME: process.env.ORACLE_HOME || '',
                 NLS_LANG: 'TURKISH_TURKEY.AL32UTF8'
             },
             instances: 1,
@@ -56,9 +56,43 @@ module.exports = {
             restart_delay: 300000 // 5 minutes
         },
         {
+            name: 'notification-worker',
+            script: 'scripts/services/notification_worker.ts',
+            interpreter: 'node',
+            node_args: '--import tsx',
+            cwd: process.env.APP_CWD || process.cwd(),
+            env: {
+                NODE_ENV: 'production',
+                TNS_ADMIN: process.env.TNS_ADMIN || '',
+                ORACLE_HOME: process.env.ORACLE_HOME || '',
+                NLS_LANG: 'TURKISH_TURKEY.AL32UTF8'
+            },
+            instances: 1,
+            autorestart: true,
+            watch: false,
+            restart_delay: 10000
+        },
+        {
+            name: 'notifications-scheduler',
+            script: 'scripts/cron/notifications_scheduler.ts',
+            interpreter: 'node',
+            node_args: '--import tsx',
+            cwd: process.env.APP_CWD || process.cwd(),
+            env: {
+                NODE_ENV: 'production',
+                TNS_ADMIN: process.env.TNS_ADMIN || '',
+                ORACLE_HOME: process.env.ORACLE_HOME || '',
+                NLS_LANG: 'TURKISH_TURKEY.AL32UTF8'
+            },
+            instances: 1,
+            autorestart: true,
+            watch: false,
+            restart_delay: 60000
+        },
+        {
             name: 'nginx',
-            script: 'C:\\nginx\\nginx.exe',
-            args: '-p C:\\nginx',
+            script: process.env.NGINX_BIN || 'nginx',
+            args: process.env.NGINX_ARGS || '',
             interpreter: 'none',
             autorestart: true,
             watch: false
@@ -66,7 +100,7 @@ module.exports = {
         {
             name: 'telegram-polling-bridge',
             script: 'scripts/telegram/polling-bridge.js',
-            cwd: 'C:\\Users\\Administrator\\Desktop\\neolist',
+            cwd: process.env.APP_CWD || process.cwd(),
             env: {
                 NODE_ENV: 'production',
                 APP_PORT: 4554

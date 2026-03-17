@@ -92,3 +92,9 @@ start-https.bat
 # Temp / one-off scripts
 tmp_db_check.ts
 docs/WINDOWS_SSL_PFX.md
+
+# Internal handoff / local ops notes
+AGENT_HANDOFF_*.md
+
+# Local temporary db runner scripts
+scripts/db/_*.ts

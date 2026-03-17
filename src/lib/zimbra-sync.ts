@@ -2,10 +2,10 @@ import https from 'https'
 import crypto from 'crypto'
 import { executeQuery } from './oracle'
 
-// Zimbra CalDAV configuration - use getters to ensure env is loaded
-const ZIMBRA_HOST = 'webmail.optimed.com.tr'
-const ZIMBRA_CALDAV_PORT = 443
-const ZIMBRA_ADMIN_PORT = 7071
+// Zimbra CalDAV configuration - use env with safe defaults
+const ZIMBRA_HOST = process.env.ZIMBRA_HOST || 'mail.example.com'
+const ZIMBRA_CALDAV_PORT = Number(process.env.ZIMBRA_CALDAV_PORT || 443)
+const ZIMBRA_ADMIN_PORT = Number(process.env.ZIMBRA_ADMIN_PORT || 7071)
 
 function getAdminEmail(): string {
     return process.env.ZIMBRA_ADMIN_EMAIL || ''
@@ -544,6 +544,20 @@ export async function updateZimbraTaskViaAdminAPI(
     }
 ): Promise<{ success: boolean; error?: string; newTaskId?: string }> {
     try {
+        let safeTitle = updates.title
+
+        if (!safeTitle) {
+            const existingTask = await getZimbraTaskViaAdminAPI(userEmail, zimbraTaskId)
+            if (existingTask.success && existingTask.task) {
+                safeTitle =
+                    existingTask.task.name ||
+                    existingTask.task.subject ||
+                    existingTask.task.su ||
+                    existingTask.task.inv?.[0]?.comp?.[0]?.name ||
+                    undefined
+            }
+        }
+
         // Try CalDAV update first (preserves calItemId - no stale IDs in webmail)
         const caldavResult = await updateTaskViaCalDAV(userEmail, zimbraTaskId, updates)
         if (caldavResult.success) {
@@ -556,7 +570,7 @@ export async function updateZimbraTaskViaAdminAPI(
         await deleteZimbraTaskViaAdminAPI(userEmail, zimbraTaskId)
 
         const createResult = await createZimbraTaskViaAdminAPI(userEmail, {
-            title: updates.title || 'Untitled Task',
+            title: safeTitle || 'NeoList Task',
             notes: updates.notes,
             due_date: updates.due_date,
             priority: updates.priority,

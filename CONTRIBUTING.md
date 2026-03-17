@@ -254,7 +254,7 @@ GitHub Issues'da "Feature Request" etiketi ile issue açın:
 
 Sorularınız için:
 - GitHub Issues
-- Email: dev@optimed.com.tr
+- Email: dev@example.com
 
 ---
 

@@ -79,11 +79,11 @@ createZimbraTask(userEmail, task)
 
 ```env
 # Zimbra Sunucu Adresi (https:// olmadan)
-ZIMBRA_HOST=webmail.optimed.com.tr
+ZIMBRA_HOST=mail.example.com
 
 # Admin Hesap Bilgileri
 # Bu hesap Admin SOAP API erişimine sahip olmalı
-ZIMBRA_ADMIN_EMAIL=istakip@optimed.com.tr
+ZIMBRA_ADMIN_EMAIL=admin@example.com
 ZIMBRA_ADMIN_PASSWORD=admin_şifresi
 ```
 
