@@ -32,10 +32,8 @@ export async function GET(request: NextRequest) {
             current_user_id: session.user.id
         }
 
-        if (role !== 'admin' && role !== 'superadmin' && branch && !isAllBranches) {
-            whereParts.push('p.branch = :branch')
-            params.branch = branch
-        }
+        // Tüm kullanıcılar tüm şubelerden yönetici/sorumlu seçebilir
+        // (Birim yöneticileri diğer şubelerdeki üstlerini seçebilmeli)
 
         if (query.length > 0) {
             whereParts.push('(LOWER(p.full_name) LIKE :q OR LOWER(p.email) LIKE :q)')

@@ -92,12 +92,18 @@ export async function POST(request: NextRequest) {
                 // Create task
                 const taskId = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
                 
-                // Parse due date
+                // Parse due date (supports DD.MM.YYYY, YYYY-MM-DD, ISO etc.)
                 let dueDate = null
                 if (dueDateStr) {
-                    const parsed = new Date(dueDateStr)
-                    if (!isNaN(parsed.getTime())) {
-                        dueDate = parsed.toISOString()
+                    const ds = dueDateStr.toString().trim()
+                    // DD.MM.YYYY format (Turkish standard)
+                    const dotMatch = ds.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/)
+                    if (dotMatch) {
+                        const parsed = new Date(`${dotMatch[3]}-${dotMatch[2].padStart(2,'0')}-${dotMatch[1].padStart(2,'0')}`)
+                        if (!isNaN(parsed.getTime())) dueDate = parsed.toISOString()
+                    } else {
+                        const parsed = new Date(ds)
+                        if (!isNaN(parsed.getTime())) dueDate = parsed.toISOString()
                     }
                 }
 

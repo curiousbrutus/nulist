@@ -31,6 +31,7 @@ export async function POST(request: NextRequest) {
         
         // Get tasks from current list if provided
         if (context?.list_id) {
+            try {
             const listTasks = await executeQuery(
                 `SELECT t.title, t.notes, t.priority, t.due_date, t.is_completed,
                         (SELECT LISTAGG(p.full_name, ', ') WITHIN GROUP (ORDER BY p.full_name)
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
                          WHERE ta.task_id = t.id) as assignees,
                         l.title as list_name
                  FROM tasks t
-                 JOIN lists l ON t.list_id = l.id
+                 LEFT JOIN lists l ON t.list_id = l.id
                  WHERE t.list_id = :list_id
                  ORDER BY t.due_date NULLS LAST
                  FETCH FIRST 50 ROWS ONLY`,
@@ -61,35 +62,45 @@ export async function POST(request: NextRequest) {
                     return `• ${title}\n  Durum: ${completed} | Öncelik: ${priority}${dueDateStr}\n  Atanan: ${assignees}${notesStr}`
                 }).join('\n\n')
             }
+            } catch (queryError: any) {
+                console.error('AI Chat - list tasks query error:', queryError.message)
+                // Graceful degradation - continue without list context
+            }
         }
         
-        // Get user's own assigned tasks
-        const myTasks = await executeQuery(
-            `SELECT t.title, t.priority, t.due_date, t.is_completed,
-                    l.title as list_name,
-                    f.title as folder_name
-             FROM tasks t
-             JOIN task_assignees ta ON t.id = ta.task_id
-             JOIN lists l ON t.list_id = l.id
-             JOIN folders f ON l.folder_id = f.id
-             WHERE ta.user_id = :user_id
-             AND t.is_completed = 0
-             ORDER BY t.due_date NULLS LAST
-             FETCH FIRST 20 ROWS ONLY`,
-            { user_id: session.user.id },
-            session.user.id
-        ) as any[]
+        // Get user's own assigned tasks (LEFT JOIN to avoid VPD/NULL issues)
+        try {
+            const myTasks = await executeQuery(
+                `SELECT t.title, t.priority, t.due_date, t.is_completed,
+                        l.title as list_name,
+                        f.title as folder_name
+                 FROM tasks t
+                 JOIN task_assignees ta ON t.id = ta.task_id
+                 LEFT JOIN lists l ON t.list_id = l.id
+                 LEFT JOIN folders f ON l.folder_id = f.id
+                 WHERE ta.user_id = :user_id
+                 AND t.is_completed = 0
+                 ORDER BY t.due_date NULLS LAST
+                 FETCH FIRST 20 ROWS ONLY`,
+                { user_id: session.user.id },
+                session.user.id
+            ) as any[]
 
-        if (myTasks.length > 0) {
-            userTasksData = `\n\n=== Kullanıcının Atandığı Aktif Görevler (${myTasks.length} adet) ===\n` + myTasks.map((t: any) => {
-                const title = t.title || t.TITLE
-                const priority = t.priority || t.PRIORITY || 'Orta'
-                const folder = t.folder_name || t.FOLDER_NAME
-                const list = t.list_name || t.LIST_NAME
-                const dueDate = t.due_date || t.DUE_DATE
-                const dueDateStr = dueDate ? `, Bitiş: ${new Date(dueDate).toLocaleDateString('tr-TR')}` : ''
-                return `• ${title} (${folder} > ${list})\n  Öncelik: ${priority}${dueDateStr}`
-            }).join('\n')
+            if (myTasks.length > 0) {
+                userTasksData = `\n\n=== Kullanıcının Atandığı Aktif Görevler (${myTasks.length} adet) ===\n` + myTasks.map((t: any) => {
+                    const title = t.title || t.TITLE
+                    const priority = t.priority || t.PRIORITY || 'Orta'
+                    const folder = t.folder_name || t.FOLDER_NAME || ''
+                    const list = t.list_name || t.LIST_NAME || ''
+                    const location = folder && list ? `(${folder} > ${list})` : list ? `(${list})` : ''
+                    const dueDate = t.due_date || t.DUE_DATE
+                    const dueDateStr = dueDate ? `, Bitiş: ${new Date(dueDate).toLocaleDateString('tr-TR')}` : ''
+                    return `• ${title} ${location}\n  Öncelik: ${priority}${dueDateStr}`
+                }).join('\n')
+            }
+        } catch (queryError: any) {
+            console.error('AI Chat - user tasks query error:', queryError.message)
+            // Graceful degradation - continue without user task context
         }
 
         const systemPrompt = `Sen Çorlu Optimed Hastanesi'nin görev yönetim asistanısın. Rolün:
@@ -183,7 +194,7 @@ Kullanıcı sorusuna göre yukarıdaki verileri kullanarak yardımcı ol.`
     } catch (error: any) {
         console.error('AI Chat error:', error)
         return NextResponse.json(
-            { error: 'AI chat failed', details: error.message },
+            { error: 'AI servisinde bir sorun oluştu', details: 'Lütfen tekrar deneyin veya yöneticinize bildirin.' },
             { status: 500 }
         )
     }
