@@ -91,6 +91,12 @@ export async function GET(request: NextRequest) {
                     OR t.created_by = :user_id
                     OR f.user_id = :user_id
                     OR l.folder_id IN (SELECT folder_id FROM folder_members WHERE user_id = :user_id)
+                    OR t.id IN (
+                        SELECT ta.task_id
+                        FROM task_assignees ta
+                        JOIN profile_managers pm ON ta.user_id = pm.profile_id
+                        WHERE pm.manager_id = :user_id
+                    )
                     OR EXISTS (
                         SELECT 1
                         FROM user_departments ud

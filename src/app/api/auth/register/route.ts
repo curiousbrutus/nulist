@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { hash } from 'bcryptjs'
 import { executeNonQuery } from '@/lib/oracle'
+import { formatProperName } from '@/lib/name-utils'
 
 // Force Node.js runtime for OracleDB
 export const runtime = 'nodejs'
@@ -40,6 +41,9 @@ export async function POST(request: NextRequest) {
         const passwordHash = await hash(password, 10)
         const userId = crypto.randomUUID()
 
+        // Format name: "fatih sak" → "Fatih Sak"
+        const formattedName = fullName ? formatProperName(fullName) : null
+
         // Kullanıcıyı oluştur
         await executeNonQuery(
             `INSERT INTO profiles (id, email, full_name, password_hash) 
@@ -47,7 +51,7 @@ export async function POST(request: NextRequest) {
             {
                 id: userId,
                 email: email.toLowerCase(),
-                full_name: fullName || null,
+                full_name: formattedName,
                 password_hash: passwordHash
             }
         )
@@ -57,7 +61,7 @@ export async function POST(request: NextRequest) {
             user: {
                 id: userId,
                 email: email.toLowerCase(),
-                fullName: fullName || null
+                fullName: formattedName
             }
         })
 

@@ -70,6 +70,15 @@ export const authConfig: NextAuthConfig = {
                 return Response.redirect(new URL('/login', request.url))
             }
 
+            // Profil tamamlanmamışsa /settings/profile'a yönlendir
+            // Yalnızca açıkça 0 olduğunda yönlendir (undefined = eski oturum, yönlendirme yok)
+            const isProfileComplete = (auth?.user as any)?.isProfileComplete
+            const isProfilePath = pathname.startsWith('/settings/profile')
+            const isApiPath = pathname.startsWith('/api/')
+            if (isProfileComplete === 0 && !isProfilePath && !isApiPath) {
+                return Response.redirect(new URL('/settings/profile?incomplete=1', request.url))
+            }
+
             return true
         },
         async jwt({ token, user }) {
@@ -79,6 +88,7 @@ export const authConfig: NextAuthConfig = {
                 token.name = user.name
                 token.picture = user.image
                 token.role = (user as any).role
+                token.isProfileComplete = (user as any).isProfileComplete ?? 0
             }
             return token
         },
@@ -88,7 +98,8 @@ export const authConfig: NextAuthConfig = {
                 session.user.email = token.email as string
                 session.user.name = token.name as string
                 session.user.image = token.picture as string
-                (session.user as any).role = token.role as string
+                ;(session.user as any).role = token.role as string
+                ;(session.user as any).isProfileComplete = token.isProfileComplete as number
             }
             return session
         }

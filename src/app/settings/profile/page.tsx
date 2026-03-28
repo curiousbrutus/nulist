@@ -1,13 +1,13 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useAuthStore } from '@/store/useAuthStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useToast } from '@/components/ui/toast'
-import { ArrowLeft, Save } from 'lucide-react'
+import { ArrowLeft, Save, AlertTriangle } from 'lucide-react'
 import { InitialsAvatar } from '@/components/ui/InitialsAvatar'
 import { QRCodeSVG } from 'qrcode.react'
 
@@ -31,6 +31,8 @@ const FALLBACK_BRANCHES: FacilityOption[] = [
 
 export default function ProfilePage() {
     const { user, profile, setProfile } = useAuthStore()
+    const searchParams = useSearchParams()
+    const isIncomplete = searchParams.get('incomplete') === '1'
     const [fullName, setFullName] = useState(profile?.full_name || '')
     const [department, setDepartment] = useState(profile?.department || '')
     const [jobTitle, setJobTitle] = useState(profile?.job_title || '')
@@ -194,6 +196,15 @@ export default function ProfilePage() {
     const isSuperadmin = profile?.role === 'superadmin'
     const isSecretary = role === 'secretary'
 
+    // Hangi alanlar eksik?
+    const missingFields: string[] = []
+    if (!fullName || !fullName.trim() || !fullName.includes(' '))
+        missingFields.push('Ad Soyad (boşlukla ayrılmış tam isim)')
+    if (!department && selectedDepartmentIds.length === 0)
+        missingFields.push('Birim / Departman')
+    if (selectedManagerIds.length === 0)
+        missingFields.push('Yönetici')
+
     return (
         <div className="min-h-screen bg-background p-4 md:p-8">
             <div className="max-w-2xl mx-auto space-y-8">
@@ -203,6 +214,26 @@ export default function ProfilePage() {
                     </Button>
                     <h1 className="text-2xl font-bold">Profil Ayarları</h1>
                 </header>
+
+                {/* Profil tamamlama uyarısı */}
+                {(isIncomplete || missingFields.length > 0) && (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/30 p-4 flex gap-3">
+                        <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                        <div>
+                            <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                                Profilinizi tamamlayınız
+                            </p>
+                            <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                                Görev bildirimleri ve yönetici görünürlüğü için aşağıdaki alanları doldurunuz:
+                            </p>
+                            <ul className="mt-1 space-y-0.5">
+                                {missingFields.map((field) => (
+                                    <li key={field} className="text-xs text-amber-700 dark:text-amber-300 list-disc ml-4">{field}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    </div>
+                )}
 
                 <div className="bg-card border rounded-2xl p-6 shadow-sm space-y-8">
                     <div className="flex flex-col items-center gap-4">
@@ -218,19 +249,28 @@ export default function ProfilePage() {
                     <form onSubmit={handleUpdate} className="space-y-6">
                         <div className="grid gap-6 md:grid-cols-2">
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">Ad Soyad</label>
+                                <label className="text-sm font-medium">
+                                    Ad Soyad {(!fullName || !fullName.trim() || !fullName.includes(' ')) && <span className="text-destructive">*</span>}
+                                </label>
                                 <Input
                                     value={fullName}
                                     onChange={(e) => setFullName(e.target.value)}
-                                    placeholder="Adınız Soyadınız"
+                                    placeholder="Örn: Ahmet Yılmaz"
+                                    className={(!fullName || !fullName.includes(' ')) ? 'border-amber-400 focus-visible:ring-amber-400' : ''}
                                 />
+                                {fullName && !fullName.includes(' ') && (
+                                    <p className="text-xs text-amber-600">Ad ve soyadı boşlukla ayırınız</p>
+                                )}
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">Birim / Departman</label>
+                                <label className="text-sm font-medium">
+                                    Birim / Departman {!department && selectedDepartmentIds.length === 0 && <span className="text-destructive">*</span>}
+                                </label>
                                 <Input
                                     value={department}
                                     onChange={(e) => setDepartment(e.target.value)}
                                     placeholder="Örn: Bilgi İşlem"
+                                    className={!department && selectedDepartmentIds.length === 0 ? 'border-amber-400 focus-visible:ring-amber-400' : ''}
                                 />
                             </div>
                         </div>

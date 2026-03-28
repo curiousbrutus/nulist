@@ -61,6 +61,37 @@ export async function POST(request: NextRequest) {
             console.error('Notification enqueue error (non-blocking):', notificationError)
         }
 
+        // Atanan kişinin yöneticilerine de bildirim gönder
+        try {
+            const managers = await executeQuery(
+                `SELECT pm.manager_id, p.full_name as subordinate_name
+                 FROM profile_managers pm
+                 JOIN profiles p ON p.id = pm.profile_id
+                 WHERE pm.profile_id = :user_id`,
+                { user_id },
+                session.user.id
+            ) as any[]
+
+            if (managers.length > 0) {
+                const managerIds = managers.map((m: any) => m.manager_id || m.MANAGER_ID)
+                const subordinateName = managers[0]?.subordinate_name || managers[0]?.SUBORDINATE_NAME
+                await createNotificationEvent({
+                    eventType: 'task_assigned_to_subordinate',
+                    taskId: task_id,
+                    actorUserId: session.user.id,
+                    recipientUserIds: managerIds,
+                    payload: {
+                        assigned_by: session.user.id,
+                        subordinate_user_id: user_id,
+                        subordinate_name: subordinateName
+                    },
+                    dedupeSeed: `assign-mgr:${task_id}:${user_id}`
+                })
+            }
+        } catch (managerNotifError) {
+            console.error('Manager notification error (non-blocking):', managerNotifError)
+        }
+
         // Atanan kullanıcının Zimbra sync'i aktifse, görevi kuyruğa ekle (Queue)
         if (assignee && assignee.zimbra_sync_enabled === 1 && assignee.email) {
             try {

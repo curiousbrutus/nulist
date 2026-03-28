@@ -7,6 +7,7 @@ type NotificationChannel = 'telegram' | 'email' | 'in_app'
 
 type NotificationEventType =
     | 'task_assigned'
+    | 'task_assigned_to_subordinate'
     | 'task_due_soon'
     | 'task_overdue'
     | 'task_status_changed'
@@ -295,6 +296,14 @@ function buildNotificationContent(args: {
         return {
             title: 'Yeni görev atandı',
             body: `${taskTitle}${listPath ? `\n${listPath}` : ''}`
+        }
+    }
+
+    if (args.eventType === 'task_assigned_to_subordinate') {
+        const subordinateName = args.payload?.subordinate_name || 'Personeliniz'
+        return {
+            title: 'Personelinize görev atandı',
+            body: `${subordinateName}: ${taskTitle}${listPath ? `\n${listPath}` : ''}`
         }
     }
 

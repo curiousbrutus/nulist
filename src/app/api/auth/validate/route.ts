@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { compare, hash } from 'bcryptjs'
 import { executeQuery, executeNonQuery } from '@/lib/oracle'
 import { authenticateWithZimbra } from '@/lib/zimbra-sync'
+import { formatProperName } from '@/lib/name-utils'
 
 // Force Node.js runtime for OracleDB
 export const runtime = 'nodejs'
@@ -56,14 +57,10 @@ export async function POST(request: NextRequest) {
                         const newId = crypto.randomUUID()
                         const passwordHash = await hash(password, 10)
                         
-                        // Parse name from email better
+                        // Parse name from email and apply proper Title Case
                         const emailNamePart = email.split('@')[0]
                         // fatih.sak -> Fatih Sak, fatih-sak -> Fatih Sak, fatihsak -> Fatihsak
-                        const formattedName = emailNamePart
-                            .replace(/[.-]/g, ' ')
-                            .split(' ')
-                            .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
-                            .join(' ')
+                        const formattedName = formatProperName(emailNamePart)
 
                         await executeNonQuery(
                             `INSERT INTO profiles (id, email, full_name, password_hash, role, zimbra_sync_enabled)
@@ -106,7 +103,8 @@ export async function POST(request: NextRequest) {
             email: user.EMAIL || user.email,
             name: user.FULL_NAME || user.full_name,
             image: user.AVATAR_URL || user.avatar_url,
-            role: user.ROLE || user.role || 'user'
+            role: user.ROLE || user.role || 'user',
+            isProfileComplete: Number(user.IS_PROFILE_COMPLETE ?? user.is_profile_complete ?? 0)
         })
 
     } catch (error: any) {
