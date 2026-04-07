@@ -79,8 +79,12 @@ ssl/
 *.crt
 *.key
 *.pfx
+*.p12
 *.p7b
 *.ca-bundle
+**/passwd.txt
+**/*private*.key
+**/*_private.key
 _.*/
 
 # Windows-specific server setup scripts (not needed in repo)
@@ -92,6 +96,20 @@ start-https.bat
 # Temp / one-off scripts
 tmp_db_check.ts
 docs/WINDOWS_SSL_PFX.md
+
+# One-off task input artifacts (local import payloads)
+Bölüm Bazlı Hazırlık Kontrol Listesi-Güncel.xlsx
+örnek_data.xlsx
+**/*task*input*.xlsx
+**/*task*input*.csv
+**/*gorev*input*.xlsx
+**/*gorev*input*.csv
+
+# Local throwaway workspace
+trash/
+
+# Local reverse-proxy binaries/artifacts
+tools/caddy/
 
 # Internal handoff / local ops notes
 AGENT_HANDOFF_*.md
