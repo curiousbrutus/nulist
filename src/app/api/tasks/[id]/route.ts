@@ -3,7 +3,7 @@ import { auth } from '@/auth'
 import { executeQuery, executeNonQuery } from '@/lib/oracle'
 import { updateZimbraTaskViaAdminAPI, getZimbraTaskViaAdminAPI } from '@/lib/zimbra-sync'
 import { createNotificationEvent } from '@/lib/notifications'
-import { checkTaskAccess } from '@/lib/auth-guard'
+import { checkTaskAccess, checkTaskDeleteAccess } from '@/lib/auth-guard'
 
 export const runtime = 'nodejs'
 
@@ -285,46 +285,11 @@ export async function PUT(
             console.log(`Priority mapping: ${originalPriority} -> ${priority}`)
         }
 
-        // Permission Check: Allow editing if user is allowed to access the task
-        // We already did an implicit visibility check in GET, but for PUT we should at least check
-        // if the user is somehow related to the task or department.
-        // For simplicity, we allow editing if the user is:
-        // 1. Assignee
-        // 2. Creator
-        // 3. Department Member
-        // 4. Department Owner
-        // 5. Admin
-        
-        // Permission Check for Update
-        const permissionSql = `
-            SELECT 1 as "access" FROM dual 
-            WHERE EXISTS (
-                 SELECT 1 FROM task_assignees WHERE task_id = :task_id AND user_id = :user_id
-            ) OR EXISTS (
-                 SELECT 1 FROM tasks WHERE id = :task_id AND created_by = :user_id
-            ) OR EXISTS (
-                 SELECT 1 FROM tasks t
-                 JOIN lists l ON t.list_id = l.id
-                 JOIN folder_members fm ON l.folder_id = fm.folder_id
-                 WHERE t.id = :task_id AND fm.user_id = :user_id
-            ) OR EXISTS (
-                 SELECT 1 FROM tasks t
-                 JOIN lists l ON t.list_id = l.id
-                 JOIN folders f ON l.folder_id = f.id
-                 WHERE t.id = :task_id AND f.user_id = :user_id
-            ) OR EXISTS (
-                 SELECT 1 FROM profiles WHERE id = :user_id AND role IN ('admin', 'superadmin')
-            )
-        ` 
-        
-        const permissionCheck = await executeQuery(
-            permissionSql,
-            { task_id: resolvedParams.id, user_id: session.user.id }
-        )
-
-        if (permissionCheck.length === 0) {
+        // Yetki kontrolü TEK kaynaktan (liste görünürlüğüyle aynı mantık → tutarlı)
+        const editAccess = await checkTaskAccess(resolvedParams.id, session.user.id)
+        if (!editAccess.allowed) {
             return NextResponse.json(
-                { error: 'Bu görevi düzenleme yetkiniz yok.' },
+                { error: editAccess.reason || 'Bu görevi düzenleme yetkiniz yok.' },
                 { status: 403 }
             )
         }
@@ -350,8 +315,11 @@ export async function PUT(
             queryParams.priority_val = priority
         }
         if (completed !== undefined) {
+            // is_completed ve status'u BİRLİKTE güncelle (ikiliği önle — UI/export/sync hep tutarlı)
             updates.push('is_completed = :is_completed_val')
             queryParams.is_completed_val = completed ? 1 : 0
+            updates.push('status = :status_val')
+            queryParams.status_val = completed ? 'completed' : 'in_progress'
         }
 
         if (recurrence_enabled !== undefined) {
@@ -558,25 +526,11 @@ export async function DELETE(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Permission Check: Only Creator, Folder Owner, ADMIN, or SUPERADMIN can delete
-        const permissionCheck = await executeQuery(
-            `SELECT 1 as "access" FROM dual 
-                 WHERE EXISTS (
-                     SELECT 1 FROM tasks WHERE id = :task_id AND created_by = :user_id
-                 ) OR EXISTS (
-                     SELECT 1 FROM tasks t
-                     JOIN lists l ON t.list_id = l.id
-                     JOIN folders f ON l.folder_id = f.id
-                     WHERE t.id = :task_id AND f.user_id = :user_id
-                 ) OR EXISTS (
-                     SELECT 1 FROM profiles WHERE id = :user_id AND role IN ('admin', 'superadmin')
-                 )`,
-            { task_id: resolvedParams.id, user_id: session.user.id }
-        )
-
-        if (permissionCheck.length === 0) {
+        // Silme yetkisi TEK kaynaktan (oluşturan / klasör sahibi / admin)
+        const deleteAccess = await checkTaskDeleteAccess(resolvedParams.id, session.user.id)
+        if (!deleteAccess.allowed) {
             return NextResponse.json(
-                { error: 'Bu görevi silme yetkiniz yok. Sadece oluşturan, klasör sahibi veya yöneticiler silebilir.' },
+                { error: deleteAccess.reason || 'Bu görevi silme yetkiniz yok.' },
                 { status: 403 }
             )
         }

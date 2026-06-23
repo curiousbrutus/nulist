@@ -90,6 +90,19 @@ export default function HomePage() {
   // Filter logic
   let filteredTasks = tasks
 
+  const importExportTargetList = (() => {
+    if (selectedListId && selectedList && !selectedFolderId) {
+      return selectedList
+    }
+
+    if (!selectedFolderId) {
+      return null
+    }
+
+    const descendantFolderIds = getDescendantFolderIds(selectedFolderId)
+    return lists.find(l => descendantFolderIds.includes(l.folder_id)) || null
+  })()
+
   // 1. Kategori/Liste/Departman Filtresi
   if (isFocusMode) {
     filteredTasks = tasks.filter(t => !t.is_completed)
@@ -125,7 +138,8 @@ export default function HomePage() {
   const now = Date.now()
   const dayMs = 1000 * 60 * 60 * 24
   const dueActiveTasks = activeTasks
-    .filter((task) => Boolean(task.due_date))
+    // "Sürekli" (ongoing) görevler süreklilik arz eder; gecikme/termin sayımına girmez.
+    .filter((task) => Boolean(task.due_date) && (task as any).status !== 'ongoing')
     .map((task) => {
       const dueDate = new Date(task.due_date as string)
       const diffDays = Math.ceil((dueDate.getTime() - now) / dayMs)
@@ -162,9 +176,9 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Import/Export Buttons (only for real lists) */}
-            {selectedListId && selectedList && !isFocusMode && !isMyTasksMode && (
-              <TaskImportExport listId={selectedListId} listName={selectedList.title} />
+            {/* Import/Export Buttons */}
+            {importExportTargetList && !isFocusMode && !isMyTasksMode && (
+              <TaskImportExport listId={importExportTargetList.id} listName={importExportTargetList.title} />
             )}
             
             {!isFocusMode && (

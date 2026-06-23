@@ -158,15 +158,21 @@ export default function AdminDashboard() {
                 <div className="mt-8 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Hızlı İşlemler</h2>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <Button className="justify-center bg-blue-600 hover:bg-blue-700 text-white">
-                            Yeni Kullanıcı Ekle
-                        </Button>
-                        <Button className="justify-center bg-purple-600 hover:bg-purple-700 text-white">
-                            Sistem Logu Görüntüle
-                        </Button>
-                        <Button className="justify-center bg-orange-600 hover:bg-orange-700 text-white">
-                            Yedek Oluştur
-                        </Button>
+                        <Link href="/admin/users">
+                            <Button className="w-full justify-center bg-blue-600 hover:bg-blue-700 text-white">
+                                Kullanıcı Yönetimi
+                            </Button>
+                        </Link>
+                        <Link href="/admin/tasks">
+                            <Button className="w-full justify-center bg-purple-600 hover:bg-purple-700 text-white">
+                                Görevleri Yönet
+                            </Button>
+                        </Link>
+                        <Link href="/admin/reports">
+                            <Button className="w-full justify-center bg-orange-600 hover:bg-orange-700 text-white">
+                                Raporlar
+                            </Button>
+                        </Link>
                     </div>
                 </div>
             </div>

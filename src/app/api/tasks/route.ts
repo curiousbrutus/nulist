@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { executeQuery, executeNonQuery } from '@/lib/oracle'
+import { buildTaskVisibility, getUserRoleAndBranch } from '@/lib/auth-guard'
 
 export const runtime = 'nodejs'
 
@@ -63,55 +64,19 @@ export async function GET(request: NextRequest) {
         const { searchParams } = new URL(request.url)
         const listId = searchParams.get('list_id')
 
-        const roleRows = await executeQuery(
-            `SELECT role FROM profiles WHERE id = :id`,
-            { id: session.user.id },
-            session.user.id
-        )
-        const role = String(roleRows[0]?.role || roleRows[0]?.ROLE || '')
+        // TEK YETKİ KAYNAĞI: görünürlük filtresi auth-guard'dan gelir (liste = detay = aynı mantık)
+        const { role, branch } = await getUserRoleAndBranch(session.user.id)
+        const vis = buildTaskVisibility(role, session.user.id, branch)
 
         let sql = `
             SELECT t.*,
                    (SELECT COUNT(*) FROM task_assignees ta WHERE ta.task_id = t.id) as assignee_count,
                    (SELECT COUNT(*) FROM comments c WHERE c.task_id = t.id) as comment_count
             FROM tasks t
-            JOIN lists l ON t.list_id = l.id
-            JOIN folders f ON l.folder_id = f.id
-            LEFT JOIN folders pf ON pf.id = f.parent_id
-            WHERE 1=1
+            WHERE ${vis.clause}
         `
 
-        const params: any = {}
-
-        if (role !== 'admin' && role !== 'superadmin') {
-            params.user_id = session.user.id
-            sql += `
-                AND (
-                    t.id IN (SELECT task_id FROM task_assignees WHERE user_id = :user_id)
-                    OR t.created_by = :user_id
-                    OR f.user_id = :user_id
-                    OR l.folder_id IN (SELECT folder_id FROM folder_members WHERE user_id = :user_id)
-                    OR t.id IN (
-                        SELECT ta.task_id
-                        FROM task_assignees ta
-                        JOIN profile_managers pm ON ta.user_id = pm.profile_id
-                        WHERE pm.manager_id = :user_id
-                    )
-                    OR EXISTS (
-                        SELECT 1
-                        FROM user_departments ud
-                        JOIN departments d ON d.id = ud.department_id
-                        JOIN facilities fac ON fac.id = d.facility_id
-                        WHERE ud.user_id = :user_id
-                          AND (
-                            UPPER(TRIM(f.title)) = UPPER(TRIM(d.name))
-                            OR UPPER(TRIM(NVL(pf.title, ''))) = UPPER(TRIM(d.name))
-                          )
-                          AND UPPER(TRIM(NVL(pf.title, f.title))) = UPPER(TRIM(fac.name))
-                    )
-                )
-            `
-        }
+        const params: any = { ...vis.params }
 
         if (listId) {
             sql += ' AND t.list_id = :list_id'

@@ -25,12 +25,12 @@ export async function GET(request: NextRequest) {
 
         try {
             const query = userId
-                ? `SELECT id, email, full_name, avatar_url, department, role, branch, meeting_type, telegram_user_id, 
-                          job_title, phone, manager_id, is_profile_complete, created_at, updated_at
+                ? `SELECT id, email, full_name, avatar_url, department, role, branch, meeting_type, telegram_user_id,
+                          job_title, phone, manager_id, is_profile_complete, zimbra_sync_enabled, zimbra_last_sync, created_at, updated_at
                    FROM profiles
                    WHERE id = :id`
                 : `SELECT id, email, full_name, avatar_url, department, role, branch, meeting_type, telegram_user_id,
-                          job_title, phone, manager_id, is_profile_complete, created_at, updated_at
+                          job_title, phone, manager_id, is_profile_complete, zimbra_sync_enabled, zimbra_last_sync, created_at, updated_at
                    FROM profiles
                    WHERE email = :email`
 
@@ -215,15 +215,11 @@ export async function PUT(request: NextRequest) {
 
         const nextFullName = full_name !== undefined ? full_name : currentProfile[0]?.full_name
         const nextDepartment = department !== undefined ? department : currentProfile[0]?.department
-        const nextBranch = branch !== undefined ? branch : currentProfile[0]?.branch
-        const nextJobTitle = job_title !== undefined ? job_title : currentProfile[0]?.job_title
         const currentManagerId = currentProfile[0]?.manager_id
         const nextPrimaryManager = hasManagerUpdate ? (sanitizedManagerIds[0] || null) : currentManagerId
         const profileComplete =
             nextFullName &&
             nextDepartment &&
-            nextBranch &&
-            nextJobTitle &&
             nextPrimaryManager
 
         updates.push('is_profile_complete = :is_profile_complete')

@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import Link from 'next/link'
 import { useAuthStore } from '@/store/useAuthStore'
 import { Button } from '@/components/ui/button'
@@ -31,8 +32,8 @@ const FALLBACK_BRANCHES: FacilityOption[] = [
 
 export default function ProfilePage() {
     const { user, profile, setProfile } = useAuthStore()
-    const searchParams = useSearchParams()
-    const isIncomplete = searchParams.get('incomplete') === '1'
+    const { update } = useSession()
+    const [isIncomplete, setIsIncomplete] = useState(false)
     const [fullName, setFullName] = useState(profile?.full_name || '')
     const [department, setDepartment] = useState(profile?.department || '')
     const [jobTitle, setJobTitle] = useState(profile?.job_title || '')
@@ -50,6 +51,12 @@ export default function ProfilePage() {
     const [loading, setLoading] = useState(false)
     const { showToast } = useToast()
     const router = useRouter()
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        const params = new URLSearchParams(window.location.search)
+        setIsIncomplete(params.get('incomplete') === '1')
+    }, [])
 
     useEffect(() => {
         const loadInitialData = async () => {
@@ -169,6 +176,9 @@ export default function ProfilePage() {
                 const err = await res.json()
                 showToast(`Güncelleme hatası: ${err.error}`, 'error')
             } else {
+                const updated = await res.json()
+                const isProfileComplete = Number(updated?.is_profile_complete ?? updated?.IS_PROFILE_COMPLETE ?? 0)
+
                 // Update local state
                 setProfile({
                     ...profile!,
@@ -184,8 +194,22 @@ export default function ProfilePage() {
                     manager_ids: selectedManagerIds,
                     manager_id: selectedManagerIds[0]
                 })
+                await update({
+                    user: {
+                        name: fullName,
+                        role: updated?.role ?? updated?.ROLE ?? role,
+                        isProfileComplete
+                    }
+                })
                 showToast('Profil başarıyla güncellendi!', 'success')
-                router.push('/')
+                const nowComplete = isProfileComplete === 1
+                // Yalnızca "profil tamamlama" akışından gelip tamamlandıysa ana sayfaya dön;
+                // normal düzenlemede sayfada kal (önceden her kayıtta ana sayfaya atıyordu = "kayboluyor").
+                if (isIncomplete && nowComplete) {
+                    router.push('/')
+                } else {
+                    setIsIncomplete(!nowComplete)
+                }
             }
         } catch (error) {
             showToast('Güncelleme hatası', 'error')

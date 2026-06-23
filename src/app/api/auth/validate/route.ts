@@ -32,12 +32,11 @@ export async function POST(request: NextRequest) {
         let user = users[0]
         let isValid = false
 
-        if (user && user.PASSWORD_HASH) {
-            // Veritabanında varsa ve şifre hash'i varsa kontrol et
-            isValid = await compare(
-                password as string,
-                user.PASSWORD_HASH || user.password_hash
-            )
+        // NOT: executeQuery kolon adlarını küçük harfe çevirir; bu yüzden hem büyük
+        // hem küçük varyantı kontrol et (aksi halde DB şifresiyle giriş hiç çalışmaz).
+        const passwordHash = user?.PASSWORD_HASH || user?.password_hash
+        if (user && passwordHash) {
+            isValid = await compare(password as string, passwordHash)
         }
 
         // 2. Veritabanı doğrulaması başarısızsa veya kullanıcı yoksa Zimbra'yı dene
