@@ -23,7 +23,9 @@ export default function HomePage() {
   const [isMyTasksMode, setIsMyTasksMode] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isActiveSectionOpen, setIsActiveSectionOpen] = useState(true)
+  const [isOngoingSectionOpen, setIsOngoingSectionOpen] = useState(false)
   const [isCompletedSectionOpen, setIsCompletedSectionOpen] = useState(false)
+  const [visibleActive, setVisibleActive] = useState(60)
   const router = useRouter()
 
   useEffect(() => {
@@ -47,9 +49,10 @@ export default function HomePage() {
     }
   }, [selectedListId])
 
-  // Departman/Liste değiştiğinde seçili görevi temizle
+  // Departman/Liste değiştiğinde seçili görevi temizle + render limitini sıfırla
   useEffect(() => {
     setSelectedTask(null)
+    setVisibleActive(60)
   }, [selectedListId, setSelectedTask])
 
   if (isLoading || !user) {
@@ -148,9 +151,14 @@ export default function HomePage() {
     .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
 
   const overdueCount = dueActiveTasks.filter((item) => item.diffDays < 0).length
-  const urgentCount = dueActiveTasks.filter((item) => item.diffDays >= 0 && item.diffDays <= 1).length
-  const upcomingCount = dueActiveTasks.filter((item) => item.diffDays >= 2 && item.diffDays <= 3).length
-  const topDueTasks = dueActiveTasks.slice(0, 5)
+  const dueTodayCount = dueActiveTasks.filter((item) => item.diffDays === 0).length
+  const thisWeekCount = dueActiveTasks.filter((item) => item.diffDays >= 0 && item.diffDays <= 7).length
+  const totalForRate = activeTasks.length + completedTasks.length
+  const completionRate = totalForRate > 0 ? Math.round((completedTasks.length / totalForRate) * 100) : 0
+
+  // "Sürekli" görevleri ayır (süreklilik arz eder; ayrı bölüm)
+  const ongoingTasks = activeTasks.filter((t) => (t as any).status === 'ongoing')
+  const normalActiveTasks = activeTasks.filter((t) => (t as any).status !== 'ongoing')
 
   return (
     <div className="flex h-screen bg-background text-foreground overflow-hidden">
@@ -211,22 +219,23 @@ export default function HomePage() {
           <div className="max-w-4xl mx-auto h-full overflow-visible">
             {viewMode === 'list' ? (
               <div className="space-y-8">
-                {!isFocusMode && !isMyTasksMode && !searchQuery.trim() && topDueTasks.length > 0 && (
-                  <section className="border rounded-xl bg-card p-4 space-y-3">
-                    <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                      <span className="px-2 py-1 rounded-full bg-red-100 text-red-700">Geciken: {overdueCount}</span>
-                      <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-700">Acil (0-1 gün): {urgentCount}</span>
-                      <span className="px-2 py-1 rounded-full bg-blue-100 text-blue-700">Yaklaşan (2-3 gün): {upcomingCount}</span>
+                {!isFocusMode && !searchQuery.trim() && activeTasks.length > 0 && (
+                  <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="rounded-xl border bg-card p-3">
+                      <p className="text-xs text-muted-foreground">Geciken</p>
+                      <p className="text-2xl font-semibold text-red-600">{overdueCount}</p>
                     </div>
-                    <div className="space-y-2">
-                      {topDueTasks.map(({ task, diffDays }) => (
-                        <div key={`due-${task.id}`} className="flex items-center justify-between text-sm border rounded-lg px-3 py-2 bg-background/60">
-                          <span className="truncate pr-2">{task.title}</span>
-                          <span className={diffDays < 0 ? 'text-red-600 font-semibold' : diffDays <= 1 ? 'text-amber-600 font-semibold' : 'text-blue-600 font-semibold'}>
-                            {diffDays < 0 ? `${Math.abs(diffDays)} gün gecikti` : diffDays === 0 ? 'Bugün' : `${diffDays} gün kaldı`}
-                          </span>
-                        </div>
-                      ))}
+                    <div className="rounded-xl border bg-card p-3">
+                      <p className="text-xs text-muted-foreground">Bugün</p>
+                      <p className="text-2xl font-semibold text-amber-600">{dueTodayCount}</p>
+                    </div>
+                    <div className="rounded-xl border bg-card p-3">
+                      <p className="text-xs text-muted-foreground">Bu hafta</p>
+                      <p className="text-2xl font-semibold">{thisWeekCount}</p>
+                    </div>
+                    <div className="rounded-xl border bg-card p-3">
+                      <p className="text-xs text-muted-foreground">Tamamlanma</p>
+                      <p className="text-2xl font-semibold text-emerald-600">%{completionRate}</p>
                     </div>
                   </section>
                 )}
@@ -291,18 +300,48 @@ export default function HomePage() {
                     onClick={() => setIsActiveSectionOpen(prev => !prev)}
                     className="w-full flex items-center justify-between rounded-lg px-2 py-1.5 text-left hover:bg-muted/40 transition-colors"
                   >
-                    <h3 className="text-xs font-semibold text-muted-foreground uppercase">Devam Edenler ({activeTasks.length})</h3>
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase">Devam Edenler ({normalActiveTasks.length})</h3>
                     {isActiveSectionOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                   </button>
 
                   {isActiveSectionOpen && (
                     <div className="space-y-2">
-                      {activeTasks.map((task, index) => (
+                      {normalActiveTasks.slice(0, visibleActive).map((task, index) => (
                         <TaskItem key={task.id || `active-${index}`} task={task} />
                       ))}
+                      {normalActiveTasks.length > visibleActive && (
+                        <button
+                          type="button"
+                          onClick={() => setVisibleActive(v => v + 60)}
+                          className="w-full py-2 text-sm font-medium text-primary hover:bg-muted/40 rounded-lg transition-colors"
+                        >
+                          Daha fazla göster ({normalActiveTasks.length - visibleActive} görev daha)
+                        </button>
+                      )}
                     </div>
                   )}
                 </section>
+
+                {ongoingTasks.length > 0 && (
+                  <section className="space-y-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsOngoingSectionOpen(prev => !prev)}
+                      className="w-full flex items-center justify-between rounded-lg px-2 py-1.5 text-left hover:bg-muted/40 transition-colors"
+                    >
+                      <h3 className="text-xs font-semibold text-violet-600 uppercase">Sürekli ({ongoingTasks.length})</h3>
+                      {isOngoingSectionOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                    </button>
+
+                    {isOngoingSectionOpen && (
+                      <div className="space-y-2">
+                        {ongoingTasks.map((task, index) => (
+                          <TaskItem key={task.id || `ongoing-${index}`} task={task} />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                )}
 
                 {completedTasks.length > 0 && !isFocusMode && (
                   <section className="space-y-2 pt-2">

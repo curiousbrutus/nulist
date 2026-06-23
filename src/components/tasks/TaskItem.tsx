@@ -1,6 +1,6 @@
 'use client'
 
-import { CheckCircle2, Circle, Star, Calendar, MessageSquare, Folder } from 'lucide-react'
+import { CheckCircle2, Circle, Star, Calendar, MessageSquare, Folder, Building2, RefreshCw } from 'lucide-react'
 import { Task } from '@/types/database'
 import { useAuthStore } from '@/store/useAuthStore'
 import { useTaskStore } from '@/store/useTaskStore'
@@ -99,6 +99,20 @@ export default function TaskItem({ task }: TaskItemProps) {
                                 <span className="truncate max-w-[130px]">{folder.title}</span>
                                 <span className="text-muted-foreground/50">/</span>
                                 <span className="truncate max-w-[130px]">{list.title}</span>
+                            </div>
+                        )}
+                        {/* Şube (branch) */}
+                        {(task as any).branch && (
+                            <div className="flex items-center gap-1 text-[10px] text-muted-foreground font-medium bg-muted/40 px-1.5 py-0.5 rounded">
+                                <Building2 className="h-3 w-3" />
+                                {(task as any).branch}
+                            </div>
+                        )}
+                        {/* Sürekli görev göstergesi */}
+                        {(task as any).status === 'ongoing' && (
+                            <div className="flex items-center gap-1 text-[10px] text-violet-600 font-semibold bg-violet-500/10 px-1.5 py-0.5 rounded">
+                                <RefreshCw className="h-3 w-3" />
+                                Sürekli
                             </div>
                         )}
                         {task.due_date && (

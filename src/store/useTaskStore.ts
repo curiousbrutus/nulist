@@ -99,7 +99,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     folderMembers: [],
     lists: [],
     tasks: [],
-    selectedListId: null,
+    selectedListId: 'my-tasks', // Akıllı varsayılan: açılışta "Bana Atananlar"
     searchQuery: '',
     selectedTask: null,
 
